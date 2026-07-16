@@ -4,10 +4,13 @@
 #include <objc/runtime.h>
 #include <objc/message.h>
 #include <CoreGraphics/CoreGraphics.h>
+#include <AudioToolbox/AudioToolbox.h>
 #include <mach/mach_time.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "core.h"
+#include "synth.h"
 
 #define SEL_(s) sel_registerName(s)
 #define CLS_(s) ((id)objc_getClass(s))
@@ -15,7 +18,7 @@
 
 static uint32_t g_rgba[FBW * FBH];
 static uint8_t  g_keys[128];
-static int      g_running = 1;
+static int      g_running;   // 見 synth.c 的 16KB 教訓：初值在執行期賦，別寫非零初始化
 extern uint64_t g_checksum;
 
 // framebuffer(調色盤索引) → RGBA，然後貼進視窗。整個「顯示」就這樣。
@@ -42,6 +45,44 @@ static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     CGColorSpaceRelease(cs);
 }
 
+// 音訊：作業系統來要 sample，我們就算給它。沒有檔案，沒有解碼器。
+static OSStatus render_cb(void *ref, AudioUnitRenderActionFlags *flags,
+                          const AudioTimeStamp *ts, UInt32 bus, UInt32 frames,
+                          AudioBufferList *io) {
+    (void)ref; (void)flags; (void)ts; (void)bus;
+    synth_render((int16_t *)io->mBuffers[0].mData, frames);
+    return noErr;
+}
+
+static void audio_start(void) {
+    AudioComponentDescription d = { kAudioUnitType_Output, kAudioUnitSubType_DefaultOutput,
+                                    kAudioUnitManufacturer_Apple, 0, 0 };
+    AudioComponent comp = AudioComponentFindNext(0, &d);
+    if (!comp) return;
+    AudioUnit au;
+    if (AudioComponentInstanceNew(comp, &au) != noErr) return;
+    AudioStreamBasicDescription f = { 0 };
+    f.mSampleRate = SR;
+    f.mFormatID = kAudioFormatLinearPCM;
+    f.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
+    f.mFramesPerPacket = 1;
+    f.mChannelsPerFrame = 2;
+    f.mBitsPerChannel = 16;
+    f.mBytesPerFrame = 4;
+    f.mBytesPerPacket = 4;
+    AudioUnitSetProperty(au, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &f, sizeof f);
+    AURenderCallbackStruct cb = { render_cb, 0 };
+    AudioUnitSetProperty(au, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &cb, sizeof cb);
+    AudioUnitInitialize(au);
+    AudioOutputUnitStart(au);
+}
+
+// sim 吐事件 → 這裡翻譯成聲音。sim 不知道有音效這回事。
+static void play_events(void) {
+    if (g_events & (EV_JUMP_A | EV_JUMP_B)) synth_note(NCHAN - 1, 5, (g_events & EV_JUMP_A) ? 84 : 79, 180);
+    if (g_events & (EV_LAND_A | EV_LAND_B)) synth_note(NCHAN - 1, 4, 48, 140);
+}
+
 static void pump_events(id app, id mode) {
     id past = MSG(id)(CLS_("NSDate"), SEL_("distantPast"));
     for (;;) {
@@ -66,6 +107,7 @@ static void read_input(Input in[2]) {
 }
 
 int main(int argc, char **argv) {
+    g_running = 1;
     sim_init();
 
     // --headless N：不開視窗，跑 N 幀，印出 checksum。用來驗確定性。
@@ -106,6 +148,10 @@ int main(int argc, char **argv) {
 
     id mode = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), "kCFRunLoopDefaultMode");
 
+    synth_init();
+    audio_start();
+    music_start();
+
     // 固定時間步長。sim 永遠吃固定的 dt，跟真實時間解耦 → 確定性。
     mach_timebase_info_data_t tb; mach_timebase_info(&tb);
     const uint64_t step = 16666667ULL * tb.denom / tb.numer;  // 60Hz
@@ -117,6 +163,7 @@ int main(int argc, char **argv) {
 
         Input in[2]; read_input(in);
         sim_tick(in);
+        play_events();
         sim_draw();
         MSG(void, BOOL)(view, SEL_("setNeedsDisplay:"), YES);
         MSG(void)(view, SEL_("displayIfNeeded"));

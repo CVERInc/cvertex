@@ -14,6 +14,13 @@ extern uint32_t g_pal[256];   // 0xAARRGGBB
 // 輸入：每個角色一份。狀態只由這個結構改變。
 typedef struct { int8_t x, y; uint8_t act; } Input;
 
+// sim 吐出的事件，平台層消費後才發聲。sim 自己不認識合成器 → 音訊執行緒污染不到確定性。
+extern uint8_t g_events;
+#define EV_JUMP_A 1
+#define EV_JUMP_B 2
+#define EV_LAND_A 4
+#define EV_LAND_B 8
+
 // 確定性模擬：同樣的輸入序列 → 同樣的畫面。無隨機、無浮點、不讀時鐘。
 void sim_init(void);
 void sim_tick(const Input in[2]);

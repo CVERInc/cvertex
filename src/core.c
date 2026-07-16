@@ -72,15 +72,24 @@ void sim_init(void) {
 
 #define GROUND (150 << FP)
 
+uint8_t g_events;
+
 void sim_tick(const Input in[2]) {
+    g_events = 0;
     for (int i = 0; i < 2; i++) {
         Actor *a = &g_act[i];
         a->vx = in[i].x * (2 << FP) / 2;
-        if (in[i].act && a->grounded) { a->vy = -(5 << FP); a->grounded = 0; }
+        if (in[i].act && a->grounded) {
+            a->vy = -(5 << FP); a->grounded = 0;
+            g_events |= (EV_JUMP_A << i);
+        }
         a->vy += (1 << FP) / 4;                 // 重力
         a->x += a->vx;
         a->y += a->vy;
-        if (a->y >= GROUND) { a->y = GROUND; a->vy = 0; a->grounded = 1; }
+        if (a->y >= GROUND) {
+            if (!a->grounded) g_events |= (EV_LAND_A << i);
+            a->y = GROUND; a->vy = 0; a->grounded = 1;
+        }
         if (a->x < (8 << FP))         a->x = 8 << FP;
         if (a->x > ((FBW - 8) << FP)) a->x = (FBW - 8) << FP;
         g_checksum = g_checksum * 31 + (uint32_t)a->x + (uint32_t)a->y;
