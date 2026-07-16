@@ -125,6 +125,21 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    // --ppm N：跑 N 幀後把 framebuffer 當 PPM 吐到 stdout。ASCII 證明幾何對，
+    // 這個證明它好看——兩件不同的事。開發者的眼睛，不進正式 build。
+    if (argc > 2 && !strcmp(argv[1], "--ppm")) {
+        int n = atoi(argv[2]);
+        Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
+        for (int f = 0; f < n; f++) sim_tick(in);
+        sim_draw();
+        printf("P6\n%d %d\n255\n", FBW, FBH);
+        for (int i = 0; i < FBW * FBH; i++) {
+            uint32_t c = g_pal[g_fb[i]];
+            putchar((c >> 16) & 255); putchar((c >> 8) & 255); putchar(c & 255);
+        }
+        return 0;
+    }
+
     // --dump N：跑 N 幀後把 framebuffer 印成 ASCII。開發者的眼睛，不進正式 build。
     if (argc > 2 && !strcmp(argv[1], "--dump")) {
         int n = atoi(argv[2]);

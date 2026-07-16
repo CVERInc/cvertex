@@ -1,7 +1,17 @@
 // core.c — framebuffer + 多邊形 rasterizer + 確定性模擬。純 C，零依賴。
 #include "core.h"
 #include "g3d.h"
+#include "shape.h"
 #include <math.h>
+
+// Scratch art for pipeline work lives outside the tree (see .gitignore) and is
+// simply absent from a clean checkout. Nothing here is part of the engine.
+#if defined(__has_include)
+#  if __has_include("local/shape_demo.h")
+#    include "local/shape_demo.h"
+#    define HAVE_DEMO_SHAPE 1
+#  endif
+#endif
 
 int16_t g_sin[1024];
 
@@ -19,10 +29,13 @@ void fb_clear(uint8_t ci) {
 
 // 掃描線填色：每條掃描線求所有邊的交點，排序，成對填。
 // even-odd 規則。整數運算，無浮點 → 確定性。
-void poly_fill(const int16_t *pts, int n, uint8_t ci) {
-    if (n < 3) return;
+void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
+    int total = 0;
+    for (int c = 0; c < nc; c++) total += lens[c];
+    if (total < 3) return;
+
     int miny = pts[1], maxy = pts[1];
-    for (int i = 1; i < n; i++) {
+    for (int i = 1; i < total; i++) {
         int y = pts[i * 2 + 1];
         if (y < miny) miny = y;
         if (y > maxy) maxy = y;
@@ -33,16 +46,21 @@ void poly_fill(const int16_t *pts, int n, uint8_t ci) {
     int xs[MAXPTS];
     for (int y = miny; y <= maxy; y++) {
         int cnt = 0;
-        for (int i = 0; i < n && cnt < MAXPTS; i++) {
-            int j  = (i + 1) % n;
-            int y0 = pts[i * 2 + 1], y1 = pts[j * 2 + 1];
-            if (y0 == y1) continue;
-            // 半開區間 [min,max) → 頂點不重複計數
-            int ymin = y0 < y1 ? y0 : y1;
-            int ymax = y0 < y1 ? y1 : y0;
-            if (y < ymin || y >= ymax) continue;
-            int x0 = pts[i * 2], x1 = pts[j * 2];
-            xs[cnt++] = x0 + (int)((int32_t)(y - y0) * (x1 - x0) / (y1 - y0));
+        int base = 0;
+        for (int c = 0; c < nc; c++) {              // 每個輪廓各自封閉，不跨輪廓連線
+            int n = lens[c];
+            for (int i = 0; i < n && cnt < MAXPTS; i++) {
+                int p = base + i, q = base + (i + 1) % n;
+                int y0 = pts[p * 2 + 1], y1 = pts[q * 2 + 1];
+                if (y0 == y1) continue;
+                // 半開區間 [min,max) → 頂點不重複計數
+                int ymin = y0 < y1 ? y0 : y1;
+                int ymax = y0 < y1 ? y1 : y0;
+                if (y < ymin || y >= ymax) continue;
+                int x0 = pts[p * 2], x1 = pts[q * 2];
+                xs[cnt++] = x0 + (int)((int32_t)(y - y0) * (x1 - x0) / (y1 - y0));
+            }
+            base += n;
         }
         // 插入排序（cnt 很小）
         for (int a = 1; a < cnt; a++) {
@@ -59,6 +77,11 @@ void poly_fill(const int16_t *pts, int n, uint8_t ci) {
             for (int x = L; x <= R; x++) row[x] = ci;
         }
     }
+}
+
+void poly_fill(const int16_t *pts, int n, uint8_t ci) {
+    uint16_t one = (uint16_t)n;
+    poly_fill_n(pts, &one, 1, ci);
 }
 
 // ---- 確定性模擬 ----------------------------------------------------
@@ -85,6 +108,9 @@ void sim_init(void) {
         int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
         g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
     }
+#ifdef HAVE_DEMO_SHAPE
+    shape_install_palette(&g_demo);
+#endif
     g_frame = 0;
 }
 
@@ -120,8 +146,12 @@ void sim_tick(const Input in[2]) {
 void sim_draw(void) {
     fb_clear(0);
 
-    // 3D 在 2D 後面轉。這就是「渲染全 3D、玩法留 2D」的最小證明。
+    // 3D behind, 2D in front — the smallest proof of "render in 3D, play in 2D".
     g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
+
+#ifdef HAVE_DEMO_SHAPE
+    shape_draw(&g_demo, FBW / 2, 92, 120);
+#endif
 
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);

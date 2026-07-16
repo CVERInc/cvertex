@@ -5,7 +5,7 @@
 
 #define FBW 320
 #define FBH 180
-#define MAXPTS 64
+#define MAXPTS 256   // 一條掃描線最多幾個交點。追蹤出來的輪廓穿很多次，別用手寫多邊形的直覺抓。
 
 // 調色盤索引 framebuffer：一個 byte 一個 pixel。
 extern uint8_t  g_fb[FBW * FBH];
@@ -35,6 +35,12 @@ void sim_draw(void);
 
 // 多邊形掃描填色（even-odd）。pts = x0,y0,x1,y1,... 16.0 定點。
 void poly_fill(const int16_t *pts, int n, uint8_t ci);
+
+// 多輪廓版本：lens[] 是每個輪廓的點數。even-odd 規則讓「洞」自然發生——
+// 掃描線同時看到所有輪廓的邊，穿進外輪廓算 1 次、穿進內輪廓算第 2 次 → 不填。
+// 不需要任何「這是洞」的旗標，也不需要判斷纏繞方向：規則自己會算。
+void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci);
+
 void fb_clear(uint8_t ci);
 
 #endif
