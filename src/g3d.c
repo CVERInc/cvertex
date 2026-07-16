@@ -12,7 +12,7 @@ static inline int32_t mul15(int32_t a, int32_t b) { return (int32_t)(((int64_t)a
 
 // Rotate Y, then X, then Z. Separate rotations cost less code than composing a
 // matrix, and they're easier to read.
-static void rot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
+void g3d_rot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
     int32_t x = *px, y = *py, z = *pz, t;
     int32_t s = SIN(ay), c = COS(ay);
     t = mul15(x, c) + mul15(z, s);  z = mul15(z, c) - mul15(x, s);  x = t;
@@ -21,6 +21,13 @@ static void rot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
     s = SIN(az); c = COS(az);
     t = mul15(x, c) - mul15(y, s);  y = mul15(y, c) + mul15(x, s);  x = t;
     *px = x; *py = y; *pz = z;
+}
+
+// One projection formula, used by meshes and shapes alike. Two copies would drift.
+void g3d_project(int32_t x, int32_t y, int32_t z, int16_t *sx, int16_t *sy) {
+    int32_t zz = z < NEAR ? NEAR : z;                   // clamped z, safe to divide by
+    *sx = (int16_t)(FBW / 2 + (int32_t)(((int64_t)x * PROJ) / zz));
+    *sy = (int16_t)(FBH / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
 }
 
 #define MAXV 2048
@@ -33,12 +40,10 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
     // ---- vertices: rotate → translate → project
     for (int i = 0; i < m->nv && i < MAXV; i++) {
         int32_t x = m->v[i].x, y = m->v[i].y, z = m->v[i].z;
-        rot(&x, &y, &z, ax, ay, az);
+        g3d_rot(&x, &y, &z, ax, ay, az);
         z += tz;
         vx[i] = x; vy[i] = y; vz[i] = z;
-        int32_t zz = z < NEAR ? NEAR : z;               // clamped z, safe for projection
-        sx[i] = (int16_t)(FBW / 2 + (int32_t)(((int64_t)x * PROJ) / zz));
-        sy[i] = (int16_t)(FBH / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
+        g3d_project(x, y, z, &sx[i], &sy[i]);
     }
 
     // ---- culling + depth sort (painter's algorithm): far triangles draw first
@@ -63,7 +68,7 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         if (vz[t->a] < NEAR || vz[t->b] < NEAR || vz[t->c] < NEAR) continue;
 
         int32_t nx = t->nx, ny = t->ny, nz = t->nz;
-        rot(&nx, &ny, &nz, ax, ay, az);
+        g3d_rot(&nx, &ny, &nz, ax, ay, az);
         // Backface cull: normal · (face centroid − camera). The camera sits at the
         // view-space origin, so dotting the centroid directly is enough. This is
         // exact under perspective (not the orthographic nz-only approximation) and
@@ -90,7 +95,7 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         // normal is still a unit normal after rotating, so no normalizing, no square
         // root — that's the whole reason the normal is stored in the data.
         int32_t nx = t->nx, ny = t->ny, nz = t->nz;
-        rot(&nx, &ny, &nz, ax, ay, az);
+        g3d_rot(&nx, &ny, &nz, ax, ay, az);
         int shade = (-nz * 8) >> 15;                     // light comes from the camera
         if (shade < 0) shade = 0;
         if (shade > 7) shade = 7;

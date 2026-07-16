@@ -151,7 +151,7 @@ void sim_draw(void) {
     g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
 
 #ifdef HAVE_DEMO_SHAPE
-    shape_draw(&g_demo, FBW / 2, 92, 120);
+    shape_draw3d(&g_demo, 0, (g_sin[(g_frame * 3) & 1023] * 155) >> 15, 0, 5 << 16, 3 << 16, 20000);
 #endif
 
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };

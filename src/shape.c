@@ -3,6 +3,7 @@
 // time — runtime is left with nothing but coordinate multiplies.
 #include "shape.h"
 #include "core.h"
+#include "g3d.h"
 
 #define MAXXFORM 4096
 
@@ -24,6 +25,64 @@ void shape_draw(const Shape *s, int cx, int cy, int h) {
             t[p * 2]     = (int16_t)(cx + (((int32_t)src[p * 2]     * h) >> 15));
             t[p * 2 + 1] = (int16_t)(cy + (((int32_t)src[p * 2 + 1] * h) >> 15));
         }
+        poly_fill_n(t, &s->lens[f->len_off], f->nc, f->ci);
+    }
+}
+
+// ---- extrusion --------------------------------------------------------------
+
+// Shape space (±16384, y down) → world (16.16, y up) → rotate → project.
+static void project_pts(const int16_t *src, int n, int ax, int ay, int az,
+                        int32_t tz, int32_t size, int32_t z0, int16_t *ox, int16_t *oy) {
+    for (int p = 0; p < n; p++) {
+        int32_t x =  (int32_t)(((int64_t)src[p * 2]     * size) >> 15);
+        int32_t y = -(int32_t)(((int64_t)src[p * 2 + 1] * size) >> 15);  // SVG y goes down, the world's goes up
+        int32_t z = z0;
+        g3d_rot(&x, &y, &z, ax, ay, az);
+        g3d_project(x, y, z + tz, &ox[p], &oy[p]);
+    }
+}
+
+void shape_draw3d(const Shape *s, int ax, int ay, int az, int32_t tz, int32_t size, int32_t depth) {
+    static int16_t fx[MAXXFORM], fy[MAXXFORM], bx[MAXXFORM], by[MAXXFORM];
+    if (!s->nf) return;
+    int32_t zf = -depth / 2, zb = depth / 2;   // front is nearer the camera
+
+    // ---- side walls: one quad per silhouette edge, front rim to back rim.
+    const Fill *sil = &s->f[0];
+    int n = 0;
+    for (int c = 0; c < sil->nc; c++) n += s->lens[sil->len_off + c];
+    if (n <= MAXXFORM) {
+        const int16_t *src = &s->pts[sil->pt_off * 2];
+        project_pts(src, n, ax, ay, az, tz, size, zf, fx, fy);
+        project_pts(src, n, ax, ay, az, tz, size, zb, bx, by);
+
+        int base = 0;
+        for (int c = 0; c < sil->nc; c++) {
+            int len = s->lens[sil->len_off + c];
+            for (int i = 0; i < len; i++) {
+                int p = base + i, q = base + (i + 1) % len;
+                int16_t quad[8] = { fx[p], fy[p], fx[q], fy[q], bx[q], by[q], bx[p], by[p] };
+                // Cull by screen winding: half these walls face away and would only
+                // fight the front face for the same pixels.
+                int32_t cr = (int32_t)(quad[2] - quad[0]) * (quad[5] - quad[1])
+                           - (int32_t)(quad[4] - quad[0]) * (quad[3] - quad[1]);
+                if (cr <= 0) continue;
+                poly_fill(quad, 4, s->pal_base);   // the outline colour: a drawn line, given thickness
+            }
+            base += len;
+        }
+    }
+
+    // ---- front face: the artwork itself, flat, riding the same transform.
+    for (uint16_t i = 0; i < s->nf; i++) {
+        const Fill *f = &s->f[i];
+        int m = 0;
+        for (int c = 0; c < f->nc; c++) m += s->lens[f->len_off + c];
+        if (m > MAXXFORM) continue;
+        project_pts(&s->pts[f->pt_off * 2], m, ax, ay, az, tz, size, zf, fx, fy);
+        static int16_t t[MAXXFORM * 2];
+        for (int p = 0; p < m; p++) { t[p * 2] = fx[p]; t[p * 2 + 1] = fy[p]; }
         poly_fill_n(t, &s->lens[f->len_off], f->nc, f->ci);
     }
 }

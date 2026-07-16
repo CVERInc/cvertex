@@ -26,4 +26,16 @@ typedef struct {
 void shape_install_palette(const Shape *s);            // load pal into g_pal[pal_base..]
 void shape_draw(const Shape *s, int cx, int cy, int h); // h = desired height (pixels)
 
+// Extrude the shape along Z and put it in the 3D world: the silhouette grows walls,
+// the artwork stays flat on the front face. No triangulation anywhere — the points go
+// through g3d's transform and land in poly_fill, which only ever wanted screen
+// coordinates and never cared where they came from. Concave outlines, holes and all
+// 26 fills come along for free.
+//
+// The silhouette is f[0]: a tracer emits the backmost fill first, and for line art
+// that fill IS the outline. Art with a drawn outline hands us its own silhouette.
+//
+// size = height in world units (16.16), depth = thickness (16.16).
+void shape_draw3d(const Shape *s, int ax, int ay, int az, int32_t tz, int32_t size, int32_t depth);
+
 #endif
