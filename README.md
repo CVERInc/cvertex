@@ -1,66 +1,171 @@
 # cvertex
 
-C + vertex。一顆手捲的、零依賴的跨平台遊戲引擎，整包塞得進一片 3.5 吋軟碟（1,474,560 bytes）。
+> **Fits an entire 3D engine on a floppy disk.** cvertex (C + vertex) draws worlds
+> out of shapes instead of bitmaps, so a game, its music, and the engine itself
+> land in 1,474,560 bytes — with room to spare.
 
-畫面上沒有點陣圖，只有多邊形。
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Language: C](https://img.shields.io/badge/Language-C11-orange.svg)
+![Dependencies: none](https://img.shields.io/badge/Dependencies-none-brightgreen.svg)
 
-## 現況
+---
 
-Spike 階段。macOS 可跑（視窗 + 多邊形 + FM 音效 + 雙人輸入），Windows / Linux 平台層未寫。
+## What & why
 
-| | binary | 其中機器碼 |
+A 3.5" HD floppy holds 1,474,560 bytes. That number is the whole design brief.
+
+It rules out the usual answers before you write a line: no engine runtime, no
+textures, no sampled audio, no asset loader, no parser. What survives is
+geometry, a palette, and arithmetic — which turns out to be enough for a
+shaded, rotating 3D world with a soundtrack.
+
+The constraint isn't nostalgia. Storage was never what stopped 1994 from
+shipping full 3D — silicon was. A SNES needed an extra chip in the cartridge to
+draw wireframes at all. The floppy still fits; the hardware caught up. cvertex
+is what you get when you take the old budget and the new machine.
+
+Current cost, macOS, everything below included:
+
+| | binary | machine code |
 |---|---|---|
-| 空的 Cocoa 殼（對照組） | 33,592 | 0 |
-| ＋ rasterizer / sim / 平台層 / 輸入 | 35,256 | 2,996 |
-| ＋ FM 合成器 / tracker / 音樂 | 35,976 | 5,036 |
-| **＋ 完整 3D 管線** | **36,248** | **6,352** |
-| 預算 1,474,560 → 用掉 | **2.45%** | |
+| Empty Cocoa shell (control) | 33,592 | 0 |
+| + rasterizer, sim, platform layer, input | 35,256 | 2,996 |
+| + FM synth, tracker, music | 35,976 | 5,036 |
+| + full 3D pipeline | **36,248** | **6,352** |
+| Share of one floppy | **2.45%** | |
 
-**3D 的淨增是 1,316 bytes。**旋轉、投影、背面剔除、深度排序、平塗打光——全部。
+Almost all of that is Mach-O container overhead, not engine. The 3D pipeline —
+rotation, projection, backface culling, depth sorting, flat-shaded lighting —
+costs 1,316 bytes.
 
-體積幾乎全是 Mach-O 容器開銷，不是引擎。framework 是 dylib，不進 binary——實測多接一個
-AudioToolbox 只要 **72 bytes**，所以音效在體積上等於免費。
+## Features
 
-## 體積紀律（實測，不是傳說）
+- **Palette-indexed software rendering.** One byte per pixel, 256 colours, no GPU.
+- **Fixed-point 3D.** Not one float in the pipeline. Deterministic on every machine.
+- **Synthesized audio.** 2-op FM plus classic waveforms. No wav, no ogg, no decoder.
+- **Deterministic simulation.** Same inputs, same frame, forever. Replays and
+  lockstep multiplayer come free.
+- **Local co-op from day one.** The simulation never learns where input came from.
+- **Zero dependencies.** A C compiler is the whole toolchain.
 
-**🔴 靜態變數一律零初始化，初值在執行期賦。** 非零初始化 → `__data` → macOS 的
-segment 是 16KB 頁對齊 → **4 bytes 的初值硬拖 16,384 bytes 進檔案**。踩過一次：
-52,488 → 35,976，只因為刪掉 `static int g_row = -1` 和 `g_running = 1`。
-零初始化住 `__bss`（zerofill，不佔硬碟）——320×180 的 framebuffer 一毛錢都沒花。
-
-**每次 build 都印體積帳。** 體積是一等公民，不能等到截止前才發現超了。
-
-**量，不要猜。** 合成器第一版全程削波（peak 32768 / RMS 23772），用聽的抓不到，
-量了才發現單 voice 滿檔就溢位。混音增益是算出來的：`>>20`。
-
-## 設計
-
-**調色盤索引 framebuffer。** 一個 byte 一個 pixel，全域一張 256 色調色盤。blit 是 memcpy；淡出、閃白、換色都是改調色盤，不碰像素。
-
-**只認多邊形，不認 SVG。** SVG 是創作格式，不是執行格式。build 時把貝茲攤平成折線嚼成二進位；引擎裡沒有 parser。資產管線接 [motifmint](https://oss.cver.net/motifmint)：畫圖 → 追蹤成聚類調色盤的 SVG → 多邊形。
-
-**像素或向量是執行期的一個數字。** 同一份多邊形填進 320×180 就是像素遊戲，填進 1920×1080 就是銳利向量。
-
-**確定性模擬。** 固定時間步長、定點數、無隨機、不讀時鐘。狀態只由輸入改變。免費送 replay（存輸入即存錄影）、lockstep 連線（只交換輸入）、可重播的 debug。
-
-**平台層只回答五個問題。** 給我視窗、給我一塊貼到螢幕的記憶體、鍵盤按了什麼、現在幾點、該收工了嗎。macOS 那份是純 C 直呼 objc runtime，不用 Objective-C 編譯器。
-
-**3D 是一顆軟體 Cx4。** 沒有一個 float。旋轉查同一張正弦表、投影一次除法、平塗走既有的 `poly_fill`。法線存在模型裡（單位法線轉完仍是單位法線 → 打光不必開根號）。**打光不改像素，只是往調色盤的明暗坡上挑一格**——這是索引式 framebuffer 的紅利：光影是查表。1994 年 Rockman X2 的 Cx4 是一顆 20MHz 的定點 DSP，指令集裡真的有 `Draw wireframe` 和 `Transform Lines`；我們寫的是它的軟體版。
-
-**聲音是算出來的，不是匯入的。** 沒有 wav、沒有 ogg、沒有解碼器。2-op FM（調變器偏移載波相位，AdLib/OPL2 那味）＋方波／三角／鋸齒／LFSR 雜訊＋ADSR。**一個音色 12 bytes，整首 demo 曲是一張 32×4 的表 = 64 bytes。** sim 只吐 `g_events`，平台層才翻譯成聲音——sim 不認識合成器，所以音訊執行緒污染不到確定性。
-
-## Build
+## Quick start
 
 ```sh
 ./build.sh && ./cvertex
 ```
 
-A/D/W 控制橘色，←/→/↑ 控制藍色，Esc 離開。輸入路由是唯一知道「有幾個玩家」的地方——`sim` 不知道輸入從哪來，所以本地雙人、手把、socket 對它都一樣。
-
-驗確定性：
+A/D/W drives one character, arrow keys drive the other, Esc quits. Every build
+prints its size against the floppy budget.
 
 ```sh
-./cvertex --headless 3600   # 同輸入必得同 checksum
+./cvertex --headless 3600   # same inputs must give the same checksum
+./cvertex --dump 40         # print the framebuffer as ASCII
+```
+
+## How it works
+
+### The palette is the foundation
+
+Ordinary pixels store *what colour is here* — R235 G71 B71, four bytes. Palette
+pixels store *which number is here* — one byte, and a 256-entry table says what
+each number means.
+
+Saving three bytes a pixel is the small win. The real one is that you can change
+what number 2 *means* without touching a single pixel:
+
+| To do this | Do this | Pixels touched |
+|---|---|---|
+| Fade out | Walk all 256 entries toward black | 0 |
+| Flash on hit | Set that material's entry white for a frame | 0 |
+| Dusk lighting | Bias the whole table orange | 0 |
+| Shade a 3D face | Give each material 8 consecutive entries — one hue, eight brightnesses — and pick one by the surface normal | 0 |
+
+Light and effects aren't computed, they're a 1 KB table you edit. That is why
+the 3D pipeline is 1,316 bytes: it doesn't calculate light, it looks it up.
+
+It also explains the art the engine wants — flat fills, hard edges, no
+gradients. A gradient puts hundreds of near-identical skin tones on one face;
+256 slots can't hold them and wouldn't gain anything if they could. Here the
+constraint and the implementation are the same decision.
+
+### 3D is a software Cx4
+
+In 1994 Rockman X2 rendered wireframes with a Capcom Cx4 — a 20 MHz fixed-point
+DSP whose instruction set literally included `Draw wireframe` and
+`Transform Lines`. This is that, in software.
+
+Rotation reads the same sine table the synth uses. Projection is one divide.
+Triangles go through the same `poly_fill` the 2D path uses. Face normals live in
+the model, because a unit normal stays a unit normal through a rotation — so
+lighting never normalizes and never takes a square root.
+
+Culling and lighting share one source of truth: the model normal. Flip a
+model's normals and the object turns inside out, which is a mistake you can see
+and fix in your modelling tool.
+
+### Sound is arithmetic, not a file
+
+2-op FM (a modulator offsetting a carrier's phase — the AdLib/OPL2 voice) plus
+square, triangle, saw and LFSR noise, each with an ADSR envelope.
+
+An instrument is 12 bytes. The demo song is a 32×4 table — 64 bytes. For scale,
+a three-minute MP3 is roughly two floppies.
+
+The simulation only emits events; the platform layer turns those into notes. The
+simulation doesn't know the synth exists, so the audio thread can't touch
+determinism.
+
+### The platform layer answers five questions
+
+Give me a window. Give me memory that reaches the screen. What key is down. What
+time is it. Should I stop. The macOS layer is plain C calling the Objective-C
+runtime directly — no Objective-C compiler involved.
+
+Frameworks are dylibs on macOS, so linking one costs about 72 bytes. Audio is
+effectively free.
+
+### Assets are baked, not loaded
+
+`tools/obj2mesh` turns any `.obj` into a `const` C array at build time. No
+loader, no file format, no I/O, no error handling — and `const` data lives in a
+`__TEXT` page that was already there.
+
+Vertex normals in the file are ignored: flat shading wants face normals, so they
+are computed from geometry. Any tool's `.obj` works, whether or not it writes
+normals.
+
+## Size discipline
+
+Two rules earn their place in the budget.
+
+**Static variables are zero-initialized; assign at runtime.** A non-zero
+initializer creates `__data`, and macOS aligns segments to 16 KB — so four bytes
+of initial value drag 16,384 bytes into the file. Zero-initialized data lives in
+`__bss` and costs nothing on disk. The 320×180 framebuffer is free.
+
+**Measure, don't guess.** Every build prints its size. The first synth clipped
+through its whole range and sounded merely "a bit dirty"; the meter said peak
+32768, RMS 23772, and the mix gain was off by three bits.
+
+## Status
+
+Early. It runs, and the shape of it is settled.
+
+- macOS only. The Windows and Linux platform layers aren't written yet.
+- Near-plane handling drops any triangle with a vertex behind the camera rather
+  than clipping it properly. Invisible until geometry crosses the lens.
+- Depth sorting is per-triangle painter's algorithm, so interpenetrating
+  geometry can sort wrong.
+- `--dump` and other development paths still compile into the binary.
+
+## Development
+
+```
+src/core.c    framebuffer, polygon rasterizer, deterministic sim, sine table
+src/g3d.c     fixed-point 3D pipeline
+src/synth.c   FM synth, oscillators, tracker
+src/mac.c     macOS platform layer
+tools/        build-time asset converters
 ```
 
 ## License
