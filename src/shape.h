@@ -1,28 +1,29 @@
-// shape.h — 一個平面向量圖形：一疊填色，由後往前畫。
-// 資料由 tools/svg2poly 產生，烘進 binary（同 obj2mesh 的理由：沒有載入器）。
+// shape.h — a flat vector graphic: a stack of fills, drawn back to front.
+// Data comes from tools/svg2poly, baked into the binary (same reasoning as obj2mesh: no loader).
 #ifndef SHAPE_H
 #define SHAPE_H
 #include <stdint.h>
 
-// 一塊填色。輪廓可能不只一個——外框加它的洞——even-odd 讓洞自己成立。
-// 用 offset 不用指標：指標一顆 8 bytes，offset 2 bytes，而且不需要重定位。
+// One fill. It may have more than one contour — an outline plus its holes — the
+// even-odd rule makes the holes work on their own.
+// Offsets, not pointers: a pointer is 8 bytes, an offset is 2, and offsets need no relocation.
 typedef struct {
-    uint16_t pt_off;    // 進 pts[] 的點索引（不是 byte）
-    uint16_t len_off;   // 進 lens[] 的索引
-    uint8_t  nc;        // 幾個輪廓
-    uint8_t  ci;        // 調色盤索引
+    uint16_t pt_off;    // point index into pts[] (not a byte offset)
+    uint16_t len_off;   // index into lens[]
+    uint8_t  nc;        // number of contours
+    uint8_t  ci;        // palette index
 } Fill;
 
 typedef struct {
-    const int16_t  *pts;    // x,y 交錯。座標已正規化：最長邊 = 32768（±16384，中心在原點）
-    const uint16_t *lens;   // 每個輪廓的點數
-    const Fill     *f;      // 由後往前的繪製順序（＝SVG 的文件順序）
+    const int16_t  *pts;    // x,y interleaved. Coordinates are normalized: longest edge = 32768 (±16384, centered on the origin)
+    const uint16_t *lens;   // point count per contour
+    const Fill     *f;      // draw order, back to front (= SVG document order)
     uint16_t        nf;
-    const uint32_t *pal;    // 這個圖形要的顏色，0xAARRGGBB
+    const uint32_t *pal;    // this shape's colours, 0xAARRGGBB
     uint8_t         npal, pal_base;
 } Shape;
 
-void shape_install_palette(const Shape *s);            // 把 pal 灌進 g_pal[pal_base..]
-void shape_draw(const Shape *s, int cx, int cy, int h); // h = 想要的高度（像素）
+void shape_install_palette(const Shape *s);            // load pal into g_pal[pal_base..]
+void shape_draw(const Shape *s, int cx, int cy, int h); // h = desired height (pixels)
 
 #endif

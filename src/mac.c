@@ -1,5 +1,7 @@
-// mac.c — macOS 平台層。純 C，直接呼叫 objc runtime，不用 Objective-C 編譯器。
-// 它只回答五個問題：給我視窗、給我一塊貼到螢幕的記憶體、鍵盤按了什麼、現在幾點、該收工了嗎。
+// mac.c — the macOS platform layer. Plain C, calls the objc runtime directly, no
+// Objective-C compiler involved.
+// It only answers five questions: give me a window, give me memory that reaches the
+// screen, what key is down, what time is it, should I stop.
 #include <objc/objc.h>
 #include <objc/runtime.h>
 #include <objc/message.h>
@@ -18,10 +20,10 @@
 
 static uint32_t g_rgba[FBW * FBH];
 static uint8_t  g_keys[128];
-static int      g_running;   // 見 synth.c 的 16KB 教訓：初值在執行期賦，別寫非零初始化
+static int      g_running;   // see synth.c's 16KB lesson: assign the initial value at runtime, never give it a non-zero initializer
 extern uint64_t g_checksum;
 
-// framebuffer(調色盤索引) → RGBA，然後貼進視窗。整個「顯示」就這樣。
+// framebuffer (palette indices) → RGBA, then blit into the window. That's the whole of "display."
 static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     (void)self; (void)_cmd; (void)dirty;
     for (int i = 0; i < FBW * FBH; i++) g_rgba[i] = g_pal[g_fb[i]];
@@ -36,7 +38,7 @@ static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     CGImageRef img = CGImageCreate(FBW, FBH, 8, 32, FBW * 4, cs,
         kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little, dp, 0, 0, kCGRenderingIntentDefault);
 
-    CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);  // 像素要銳利
+    CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);  // pixels need to stay sharp
     CGRect box = CGContextGetClipBoundingBox(ctx);
     CGContextDrawImage(ctx, box, img);
 
@@ -45,7 +47,7 @@ static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     CGColorSpaceRelease(cs);
 }
 
-// 音訊：作業系統來要 sample，我們就算給它。沒有檔案，沒有解碼器。
+// Audio: the OS asks for samples, we compute them on demand. No file, no decoder.
 static OSStatus render_cb(void *ref, AudioUnitRenderActionFlags *flags,
                           const AudioTimeStamp *ts, UInt32 bus, UInt32 frames,
                           AudioBufferList *io) {
@@ -77,7 +79,7 @@ static void audio_start(void) {
     AudioOutputUnitStart(au);
 }
 
-// sim 吐事件 → 這裡翻譯成聲音。sim 不知道有音效這回事。
+// sim emits events → translated into sound here. The sim has no idea sound effects exist.
 static void play_events(void) {
     if (g_events & (EV_JUMP_A | EV_JUMP_B)) synth_note(NCHAN - 1, 5, (g_events & EV_JUMP_A) ? 84 : 79, 180);
     if (g_events & (EV_LAND_A | EV_LAND_B)) synth_note(NCHAN - 1, 4, 48, 140);
@@ -99,8 +101,8 @@ static void pump_events(id app, id mode) {
     }
 }
 
-// 鍵盤 → 兩個角色的輸入。本地雙人合作在這裡就成立了：
-// 角色 A 讀 A/D/W，角色 B 讀 ←/→/↑。sim 不知道輸入從哪來，也不在乎。
+// Keyboard → input for two characters. Local co-op is established right here:
+// character A reads A/D/W, character B reads ←/→/↑. The sim doesn't know or care where input comes from.
 static void read_input(Input in[2]) {
     in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]), 0, g_keys[13] };      // D-A, W
     in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]), 0, g_keys[126] }; // →-←, ↑
@@ -110,7 +112,7 @@ int main(int argc, char **argv) {
     g_running = 1;
     sim_init();
 
-    // --headless N：不開視窗，跑 N 幀，印出 checksum。用來驗確定性。
+    // --headless N: no window, run N frames, print the checksum. Used to verify determinism.
     if (argc > 2 && !strcmp(argv[1], "--headless")) {
         int n = atoi(argv[2]);
         for (int f = 0; f < n; f++) {
@@ -125,8 +127,9 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // --ppm N：跑 N 幀後把 framebuffer 當 PPM 吐到 stdout。ASCII 證明幾何對，
-    // 這個證明它好看——兩件不同的事。開發者的眼睛，不進正式 build。
+    // --ppm N: run N frames, dump the framebuffer to stdout as a PPM. The ASCII dump
+    // proves the geometry is right; this one proves it looks good — two different
+    // things. A developer's eyes only, doesn't ship in a release build.
     if (argc > 2 && !strcmp(argv[1], "--ppm")) {
         int n = atoi(argv[2]);
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
@@ -140,7 +143,7 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    // --dump N：跑 N 幀後把 framebuffer 印成 ASCII。開發者的眼睛，不進正式 build。
+    // --dump N: run N frames, print the framebuffer as ASCII. A developer's eyes only, doesn't ship in a release build.
     if (argc > 2 && !strcmp(argv[1], "--dump")) {
         int n = atoi(argv[2]);
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
@@ -184,7 +187,7 @@ int main(int argc, char **argv) {
     audio_start();
     music_start();
 
-    // 固定時間步長。sim 永遠吃固定的 dt，跟真實時間解耦 → 確定性。
+    // Fixed timestep. The sim always consumes a fixed dt, decoupled from wall-clock time → determinism.
     mach_timebase_info_data_t tb; mach_timebase_info(&tb);
     const uint64_t step = 16666667ULL * tb.denom / tb.numer;  // 60Hz
     uint64_t next = mach_absolute_time();

@@ -1,8 +1,10 @@
-// svg2poly — SVG → 一個烘進 binary 的 const Shape。build 時跑，不進遊戲。
+// svg2poly — SVG → a const Shape baked into the binary. Runs at build time, never ships in the game.
 //
-// 🔴 引擎永遠不認識 SVG。SVG 是創作格式，不是執行格式——完整規格是隻怪物
-// (貝茲/stroke/transform/clip-path/CSS)，實作它會吃掉整片軟碟。所以嚼在這裡：
-// 貝茲在這攤平、顏色在這聚類，引擎只收到「一串點 + 一個調色盤索引」。
+// 🔴 The engine never learns what SVG is. SVG is an authoring format, not a runtime
+// one — the full spec is a monster (bezier curves / stroke / transform / clip-path /
+// CSS), and implementing it would eat the whole floppy. So it's chewed up here
+// instead: beziers get flattened here, colours get clustered here, and the engine
+// only ever receives "a string of points + a palette index."
 //
 //   cc -O2 -o svg2poly tools/svg2poly.c -lm
 //   ./svg2poly hero.svg hero 16 > src/shape_hero.h
@@ -19,12 +21,12 @@
 
 static double px[MAXPT], py[MAXPT];
 static int    np;
-static int    clen[MAXCONT], nc;                 // 每個輪廓的點數
+static int    clen[MAXCONT], nc;                 // point count per contour
 static struct { int c0, ncont, pal; } fl[MAXFILL];
 static int    nf;
 static unsigned pal[MAXPAL]; static int npal;
 
-// 攤平容差：控制點離弦的距離平方 / 弦長平方。越小越細。
+// Flattening tolerance: squared control-point-to-chord distance / squared chord length. Smaller = finer.
 static double TOL = 0.02;
 
 static void emit(double x, double y) { if (np < MAXPT) { px[np] = x; py[np] = y; np++; } }
@@ -46,7 +48,7 @@ static int palidx(unsigned rgb) {
     return 0;
 }
 
-// 從 d="" 字串裡撈下一個數字（跳過逗號/空白，指令字母停手）
+// Pull the next number out of a d="" string (skip commas/whitespace, stop at a command letter)
 static const char *num(const char *p, double *out) {
     while (*p == ' ' || *p == ',' || *p == '\t' || *p == '\n' || *p == '\r') p++;
     if (!*p || (!(*p >= '0' && *p <= '9') && *p != '-' && *p != '+' && *p != '.')) return NULL;
@@ -66,11 +68,11 @@ static void parse_d(const char *d) {
         switch (cmd) {
         case 'M': case 'm': {
             const char *q = num(p, &a[0]); if (!q) { p++; break; } p = num(q, &a[1]);
-            if (np > cstart && nc < MAXCONT) { clen[nc++] = np - cstart; }  // 收上一個輪廓
+            if (np > cstart && nc < MAXCONT) { clen[nc++] = np - cstart; }  // close out the previous contour
             cstart = np;
             if (cmd == 'm') { cx += a[0]; cy += a[1]; } else { cx = a[0]; cy = a[1]; }
             sx = cx; sy = cy; emit(cx, cy);
-            cmd = (cmd == 'M') ? 'L' : 'l';                                 // 後續隱含 lineto
+            cmd = (cmd == 'M') ? 'L' : 'l';                                 // subsequent coordinates are an implicit lineto
             break; }
         case 'L': case 'l': {
             const char *q = num(p, &a[0]); if (!q) { cmd = 0; break; } p = num(q, &a[1]);
@@ -100,7 +102,7 @@ static void parse_d(const char *d) {
     if (np > cstart && nc < MAXCONT) clen[nc++] = np - cstart;
 }
 
-// 抓 <path> 標籤裡的某個屬性
+// Grab an attribute out of a <path> tag
 static int attr(const char *tag, const char *name, char *out, int cap) {
     char pat[32]; snprintf(pat, sizeof pat, "%s=\"", name);
     const char *s = strstr(tag, pat); if (!s) return 0;
@@ -111,17 +113,17 @@ static int attr(const char *tag, const char *name, char *out, int cap) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) { fprintf(stderr, "用法: svg2poly <in.svg> <名字> [調色盤起始=16] [容差=0.02]\n"); return 1; }
+    if (argc < 3) { fprintf(stderr, "usage: svg2poly <in.svg> <name> [palette base=16] [tolerance=0.02]\n"); return 1; }
     const char *name = argv[2];
     int base = argc > 3 ? atoi(argv[3]) : 16;
     if (argc > 4) TOL = atof(argv[4]);
 
     FILE *f = fopen(argv[1], "rb");
-    if (!f) { fprintf(stderr, "svg2poly: 開不了 %s\n", argv[1]); return 1; }
+    if (!f) { fprintf(stderr, "svg2poly: can't open %s\n", argv[1]); return 1; }
     static char buf[1 << 22];
     long n = (long)fread(buf, 1, sizeof buf - 1, f); buf[n] = 0; fclose(f);
 
-    // 逐個 <path>，照文件順序＝由後往前的畫圖順序（追蹤器就是這樣輸出的）
+    // Walk each <path> in document order = back-to-front draw order (this is how a tracer emits them)
     const char *p = buf;
     static char d[1 << 20], fill[64];
     while ((p = strstr(p, "<path")) != NULL) {
@@ -144,13 +146,13 @@ int main(int argc, char **argv) {
 
         int c0 = nc, p0 = np;
         parse_d(d);
-        if (nc == c0) continue;                               // 沒產生任何輪廓
+        if (nc == c0) continue;                               // produced no contours
         (void)p0;
         if (nf < MAXFILL) { fl[nf].c0 = c0; fl[nf].ncont = nc - c0; fl[nf].pal = palidx(rgb); nf++; }
     }
-    if (!np) { fprintf(stderr, "svg2poly: %s 裡沒有路徑\n", argv[1]); return 1; }
+    if (!np) { fprintf(stderr, "svg2poly: no paths in %s\n", argv[1]); return 1; }
 
-    // 置中 + 正規化：最長邊 → 32768（±16384）
+    // Center + normalize: longest edge → 32768 (±16384)
     double lo[2] = { 1e30, 1e30 }, hi[2] = { -1e30, -1e30 };
     for (int i = 0; i < np; i++) {
         if (px[i] < lo[0]) lo[0] = px[i]; if (px[i] > hi[0]) hi[0] = px[i];
@@ -160,8 +162,8 @@ int main(int argc, char **argv) {
     if (ext <= 0) ext = 1;
     double s = 32768.0 / ext, mx = (lo[0]+hi[0])/2, my = (lo[1]+hi[1])/2;
 
-    printf("// 由 svg2poly 從 %s 產生。別手改——改圖再跑一次 build。\n", argv[1]);
-    printf("// %d 點 / %d 輪廓 / %d 塊填色 / %d 色\n", np, nc, nf, npal);
+    printf("// generated by svg2poly from %s. Don't hand-edit — change the artwork and rebuild.\n", argv[1]);
+    printf("// %d points / %d contours / %d fills / %d colours\n", np, nc, nf, npal);
     printf("static const int16_t %s_pts[%d] = {\n", name, np * 2);
     for (int i = 0; i < np; i++)
         printf("%d,%d,%s", (int)lrint((px[i]-mx)*s), (int)lrint((py[i]-my)*s), (i % 8 == 7) ? "\n" : "");
@@ -178,7 +180,7 @@ int main(int argc, char **argv) {
     printf("};\nconst Shape g_%s = { %s_pts, %s_lens, %s_f, %d, %s_pal, %d, %d };\n",
            name, name, name, name, nf, name, npal, base);
 
-    fprintf(stderr, "svg2poly: %s → %d 點 / %d 輪廓 / %d 塊填色 / %d 色 → %d bytes\n",
+    fprintf(stderr, "svg2poly: %s → %d points / %d contours / %d fills / %d colours → %d bytes\n",
             argv[1], np, nc, nf, npal, np * 4 + nc * 2 + nf * 6 + npal * 4);
     return 0;
 }

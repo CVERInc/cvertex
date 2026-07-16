@@ -1,4 +1,4 @@
-// core.c — framebuffer + 多邊形 rasterizer + 確定性模擬。純 C，零依賴。
+// core.c — framebuffer + polygon rasterizer + deterministic simulation. Plain C, zero dependencies.
 #include "core.h"
 #include "g3d.h"
 #include "shape.h"
@@ -27,8 +27,8 @@ void fb_clear(uint8_t ci) {
     for (int i = 0; i < FBW * FBH; i++) g_fb[i] = ci;
 }
 
-// 掃描線填色：每條掃描線求所有邊的交點，排序，成對填。
-// even-odd 規則。整數運算，無浮點 → 確定性。
+// Scanline fill: for each scanline, find every edge intersection, sort, fill pairs.
+// Even-odd rule. Integer math, no floats → deterministic.
 void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
     int total = 0;
     for (int c = 0; c < nc; c++) total += lens[c];
@@ -47,13 +47,13 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
     for (int y = miny; y <= maxy; y++) {
         int cnt = 0;
         int base = 0;
-        for (int c = 0; c < nc; c++) {              // 每個輪廓各自封閉，不跨輪廓連線
+        for (int c = 0; c < nc; c++) {              // each contour closes on its own; no edges cross between contours
             int n = lens[c];
             for (int i = 0; i < n && cnt < MAXPTS; i++) {
                 int p = base + i, q = base + (i + 1) % n;
                 int y0 = pts[p * 2 + 1], y1 = pts[q * 2 + 1];
                 if (y0 == y1) continue;
-                // 半開區間 [min,max) → 頂點不重複計數
+                // half-open [min,max) → a shared vertex isn't counted twice
                 int ymin = y0 < y1 ? y0 : y1;
                 int ymax = y0 < y1 ? y1 : y0;
                 if (y < ymin || y >= ymax) continue;
@@ -62,7 +62,7 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
             }
             base += n;
         }
-        // 插入排序（cnt 很小）
+        // insertion sort (cnt is small)
         for (int a = 1; a < cnt; a++) {
             int v = xs[a], b = a - 1;
             while (b >= 0 && xs[b] > v) { xs[b + 1] = xs[b]; b--; }
@@ -84,12 +84,12 @@ void poly_fill(const int16_t *pts, int n, uint8_t ci) {
     poly_fill_n(pts, &one, 1, ci);
 }
 
-// ---- 確定性模擬 ----------------------------------------------------
-// 定點數：1 單位 = 1/256 pixel。整數運算 → 位元完全可重現。
+// ---- deterministic simulation ---------------------------------------------------
+// Fixed point: 1 unit = 1/256 pixel. Integer math → bit-exact reproducibility.
 #define FP 8
 typedef struct { int32_t x, y, vx, vy; uint8_t grounded; } Actor;
 static Actor g_act[2];
-uint64_t g_checksum;   // 決定性自我檢查
+uint64_t g_checksum;   // determinism self-check
 
 void sim_init(void) {
     tables_init();
@@ -97,13 +97,14 @@ void sim_init(void) {
     g_act[1] = (Actor){ 240 << FP, 100 << FP, 0, 0, 0 };
     g_checksum = 0;
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
-    g_pal[0] = 0xFF1A1C2C;  // 背景
-    g_pal[1] = 0xFF5D275D;  // 地面
-    g_pal[2] = 0xFFEF7D57;  // 角色 A
-    g_pal[3] = 0xFF41A6F6;  // 角色 B
+    g_pal[0] = 0xFF1A1C2C;  // background
+    g_pal[1] = 0xFF5D275D;  // ground
+    g_pal[2] = 0xFFEF7D57;  // character A
+    g_pal[3] = 0xFF41A6F6;  // character B
 
-    // 8..15＝一個材質的八階明暗坡。3D 打光不改像素，只是往坡上挑一格——
-    // 這就是調色盤索引的紅利：光影是查表，不是運算。
+    // 8..15 = one material's eight-step brightness ramp. 3D lighting never touches a
+    // pixel, it just picks a step on the ramp — that's the palette-index dividend:
+    // lighting is a lookup, not a computation.
     for (int i = 0; i < 8; i++) {
         int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
         g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -122,7 +123,7 @@ uint8_t g_events;
 
 void sim_tick(const Input in[2]) {
     g_events = 0;
-    g_frame++;   // 旋轉角度由幀數決定，不讀時鐘 → 確定性不破
+    g_frame++;   // rotation angle is driven by the frame count, never the clock → determinism holds
     for (int i = 0; i < 2; i++) {
         Actor *a = &g_act[i];
         a->vx = in[i].x * (2 << FP) / 2;
@@ -130,7 +131,7 @@ void sim_tick(const Input in[2]) {
             a->vy = -(5 << FP); a->grounded = 0;
             g_events |= (EV_JUMP_A << i);
         }
-        a->vy += (1 << FP) / 4;                 // 重力
+        a->vy += (1 << FP) / 4;                 // gravity
         a->x += a->vx;
         a->y += a->vy;
         if (a->y >= GROUND) {
@@ -156,7 +157,7 @@ void sim_draw(void) {
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);
 
-    // 兩個角色，各自一顆多邊形（spike 用手寫形狀代替 motifmint 資產）
+    // Two characters, each one polygon (spike uses a hand-written shape in place of a motifmint asset)
     for (int i = 0; i < 2; i++) {
         int cx = g_act[i].x >> FP, cy = g_act[i].y >> FP;
         int16_t body[12] = {
