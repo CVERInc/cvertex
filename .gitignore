@@ -1,0 +1,8 @@
+cvertex
+spike
+bare
+*.o
+.DS_Store
+
+# Scratch input for the asset pipeline. Never tracked.
+assets/local/
