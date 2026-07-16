@@ -9,11 +9,12 @@ typedef struct { int32_t x, y, z; } V3;              // 16.16 定點，1<<16 = 1
 // 一個三角形 10 bytes：三個頂點索引 + 調色盤基色 + 模型空間法線（Q15）。
 // 法線存起來不是偷懶，是 90 年代的正解——單位法線經過旋轉仍是單位法線，
 // 所以打光只要旋轉它、取 z，不必開根號。
-typedef struct { uint8_t a, b, c, ci; int16_t nx, ny, nz; } Tri;
+typedef struct { uint16_t a, b, c; uint8_t ci; int16_t nx, ny, nz; } Tri;
 
 typedef struct { const V3 *v; int nv; const Tri *t; int nt; } Mesh;
 
 extern const Mesh g_cube;
+extern const Mesh g_torus;
 
 // ax/ay/az：0..1023 的角度（直接是 g_sin 的索引）。tz：鏡頭距離，16.16。
 void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz);

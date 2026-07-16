@@ -121,7 +121,7 @@ void sim_draw(void) {
     fb_clear(0);
 
     // 3D 在 2D 後面轉。這就是「渲染全 3D、玩法留 2D」的最小證明。
-    g3d_draw(&g_cube, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
+    g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
 
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);
