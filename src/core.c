@@ -1,5 +1,14 @@
 // core.c — framebuffer + 多邊形 rasterizer + 確定性模擬。純 C，零依賴。
 #include "core.h"
+#include "g3d.h"
+#include <math.h>
+
+int16_t g_sin[1024];
+
+void tables_init(void) {
+    for (int i = 0; i < 1024; i++)
+        g_sin[i] = (int16_t)(sinf((float)i * 6.2831853f / 1024.f) * 32767.f);
+}
 
 uint8_t  g_fb[FBW * FBH];
 uint32_t g_pal[256];
@@ -60,6 +69,7 @@ static Actor g_act[2];
 uint64_t g_checksum;   // 決定性自我檢查
 
 void sim_init(void) {
+    tables_init();
     g_act[0] = (Actor){ 80 << FP, 100 << FP, 0, 0, 0 };
     g_act[1] = (Actor){ 240 << FP, 100 << FP, 0, 0, 0 };
     g_checksum = 0;
@@ -68,7 +78,17 @@ void sim_init(void) {
     g_pal[1] = 0xFF5D275D;  // 地面
     g_pal[2] = 0xFFEF7D57;  // 角色 A
     g_pal[3] = 0xFF41A6F6;  // 角色 B
+
+    // 8..15＝一個材質的八階明暗坡。3D 打光不改像素，只是往坡上挑一格——
+    // 這就是調色盤索引的紅利：光影是查表，不是運算。
+    for (int i = 0; i < 8; i++) {
+        int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
+        g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    }
+    g_frame = 0;
 }
+
+uint32_t g_frame;
 
 #define GROUND (150 << FP)
 
@@ -76,6 +96,7 @@ uint8_t g_events;
 
 void sim_tick(const Input in[2]) {
     g_events = 0;
+    g_frame++;   // 旋轉角度由幀數決定，不讀時鐘 → 確定性不破
     for (int i = 0; i < 2; i++) {
         Actor *a = &g_act[i];
         a->vx = in[i].x * (2 << FP) / 2;
@@ -98,6 +119,10 @@ void sim_tick(const Input in[2]) {
 
 void sim_draw(void) {
     fb_clear(0);
+
+    // 3D 在 2D 後面轉。這就是「渲染全 3D、玩法留 2D」的最小證明。
+    g3d_draw(&g_cube, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
+
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);
 

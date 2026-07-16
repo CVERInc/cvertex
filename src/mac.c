@@ -125,6 +125,23 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    // --dump N：跑 N 幀後把 framebuffer 印成 ASCII。開發者的眼睛，不進正式 build。
+    if (argc > 2 && !strcmp(argv[1], "--dump")) {
+        int n = atoi(argv[2]);
+        Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
+        for (int f = 0; f < n; f++) sim_tick(in);
+        sim_draw();
+        const char *ramp = " .:-=+*#%@";
+        for (int y = 0; y < FBH; y += 4) {
+            for (int x = 0; x < FBW; x += 2) {
+                uint8_t c = g_fb[y * FBW + x];
+                putchar(c == 0 ? ' ' : (c >= 8 && c < 16) ? ramp[(c - 8) + 1] : '0' + (c % 8));
+            }
+            putchar('\n');
+        }
+        return 0;
+    }
+
     id app = MSG(id)(CLS_("NSApplication"), SEL_("sharedApplication"));
     MSG(void, long)(app, SEL_("setActivationPolicy:"), 0);
 

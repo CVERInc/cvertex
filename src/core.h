@@ -11,11 +11,18 @@
 extern uint8_t  g_fb[FBW * FBH];
 extern uint32_t g_pal[256];   // 0xAARRGGBB
 
+// 正弦查表。合成器拿它做波形、3D 拿它做旋轉——同一張表，因為那本來就是同一件事。
+// 🔴 它住在 core 而不是 synth：共用是紅利，但誰擁有它必須明確，否則 3D 會偷偷
+// 依賴音效的初始化順序（踩過：--dump 沒呼叫 synth_init，整顆立方體塌成一個點）。
+extern int16_t g_sin[1024];   // Q15：±32767 = ±1.0
+void tables_init(void);       // sim_init 會呼叫；合成器也依賴它
+
 // 輸入：每個角色一份。狀態只由這個結構改變。
 typedef struct { int8_t x, y; uint8_t act; } Input;
 
 // sim 吐出的事件，平台層消費後才發聲。sim 自己不認識合成器 → 音訊執行緒污染不到確定性。
-extern uint8_t g_events;
+extern uint8_t  g_events;
+extern uint32_t g_frame;   // 幀數。要動畫就讀它，別讀時鐘。
 #define EV_JUMP_A 1
 #define EV_JUMP_B 2
 #define EV_LAND_A 4

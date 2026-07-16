@@ -1,10 +1,10 @@
 // synth.c — 2-op FM + 古典波形 + 微型 tracker。零取樣、零檔案。
 // 音訊在自己的執行緒跑；sim 只單向丟事件進來，永不讀合成器狀態 → 確定性不受污染。
 #include "synth.h"
+#include "core.h"
 #include <math.h>
 
 Instr g_instr[NINSTR];
-static int16_t g_sin[1024];          // 正弦查表，避免每個 sample 呼叫 libm
 
 enum { ENV_OFF, ENV_A, ENV_D, ENV_S, ENV_R };
 typedef struct {
@@ -17,8 +17,7 @@ typedef struct {
 static Voice g_v[NCHAN];
 
 void synth_init(void) {
-    for (int i = 0; i < 1024; i++)
-        g_sin[i] = (int16_t)(sinf((float)i * 6.2831853f / 1024.f) * 32767.f);
+    tables_init();   // 合成器也吃這張表，但擁有者是 core
     for (int i = 0; i < NCHAN; i++) { g_v[i].stage = ENV_OFF; g_v[i].lfsr = 0xACE1u + i; }
 
     // 八個音色。這些數字就是「音效檔」——一個音色 12 bytes。
