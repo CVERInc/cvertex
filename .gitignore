@@ -8,3 +8,4 @@ bare
 # Nothing here is part of the engine. Never tracked.
 assets/local/
 src/local/
+cvertex.app

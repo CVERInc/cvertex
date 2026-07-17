@@ -15,6 +15,10 @@
 #include "synth.h"
 #include "game.h"
 
+// A game asked to be replaced. The platform owns this because switching games is what a
+// platform does; a game just points at the next one.
+const Game *g_switch_to;
+
 #define SEL_(s) sel_registerName(s)
 #define CLS_(s) ((id)objc_getClass(s))
 #define MSG(ret, ...) ((ret (*)(id, SEL, ##__VA_ARGS__))objc_msgSend)
@@ -127,7 +131,7 @@ int main(int argc, char **argv) {
     // same run, so a question like "does a flat shape fit through that gap" gets an
     // answer instead of an opinion. It's also, exactly, a replay.
     const char *keys = 0;
-    static const Game *const games[] = { &game_vikings, &game_title, &game_forms, &game_forms3 };
+    static const Game *const games[] = { &game_title, &game_forms3, &game_forms, &game_vikings };
     #define NGAMES (int)(sizeof games / sizeof games[0])
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
@@ -136,6 +140,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[a], "--keys") && a + 1 < argc) { keys = argv[a+1]; a++; }
         else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
             g = 0;
+            if (!strcmp(argv[a+1], "menu")) g = &game_menu;
             for (int k = 0; k < NGAMES; k++) if (!strcmp(argv[a+1], games[k]->name)) g = games[k];
             if (!g) {
                 fprintf(stderr, "cvertex: no game called '%s'. Have:", argv[a+1]);
@@ -147,7 +152,7 @@ int main(int argc, char **argv) {
         }
         else if (!strcmp(argv[a], "--help") || !strcmp(argv[a], "-h")) {
             printf("cvertex — a game engine that draws worlds out of shapes\n\n");
-            printf("  --game <name>     which game to run (default: %s)\n", game_vikings.name);
+            printf("  --game <name>     which game to run (default: the menu)\n");
             printf("                    available:");
             for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);
             printf("\n");
@@ -176,6 +181,7 @@ int main(int argc, char **argv) {
         } \
     } while (0)
 
+    menu_populate(games, NGAMES);
     fb_resize(rw, rh);
     g->init();
 
@@ -294,6 +300,7 @@ int main(int argc, char **argv) {
 
         Input in[2]; read_input(in);
         g->tick(in);
+        if (g_switch_to) { g = g_switch_to; g_switch_to = 0; g->init(); memset(g_keys, 0, sizeof g_keys); continue; }
         g->audio();
         g->draw();
         MSG(void, BOOL)(view, SEL_("setNeedsDisplay:"), YES);

@@ -34,10 +34,17 @@ typedef struct {
     uint64_t (*checksum)(void);
 } Game;
 
+// A game may ask to be replaced by another. The platform layer honours it between frames
+// and re-inits — which is the whole of "switching games", and it's a fact about the
+// platform, not about menus. Set it and stop caring; you won't get another tick.
+extern const Game *g_switch_to;
+
 // Every game defines one of these; the platform layer picks between them.
 extern const Game game_vikings;
 extern const Game game_title;
 extern const Game game_forms;
 extern const Game game_forms3;
+extern const Game game_menu;
+void menu_populate(const Game *const *list, int n);
 
 #endif

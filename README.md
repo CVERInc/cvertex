@@ -46,7 +46,7 @@ wondering what else knows about it. It isn't a big claim — this is all of it:
 | `src/synth.c` | FM synth, oscillators, tracker |
 | `src/mac.c` | the macOS platform layer |
 | `src/game.h` | the line between the engine and a game |
-| `games/*.c` | the games |
+| `games/*.c` | the games, including the menu that picks between them |
 
 The engine's machine code currently rounds to about eleven kilobytes, but that number is
 `./build.sh`'s to report, not this file's to remember. A linked binary is much larger and
@@ -71,11 +71,12 @@ baked artwork outweighs all the code. Neither is the engine.
 ## Quick start
 
 ```sh
-./build.sh && ./cvertex
+./build.sh && ./cvertex          # opens a menu; arrows to pick, W to start, Esc quits
+tools/bundle.sh && open cvertex.app   # ...or the same thing, double-clickable
 ```
 
-A/D/W drives one character, arrow keys drive the other, Esc quits. Every build prints its
-size — the number is worth watching, and watching it is free.
+In a game: A/D/W drives one character, the arrow keys drive the other. Every build prints
+its size — the number is worth watching, and watching it is free.
 
 ```sh
 ./cvertex --res 1920 1080   # any resolution; the art is vector
