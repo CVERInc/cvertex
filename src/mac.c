@@ -92,12 +92,11 @@ static void pump_events(id app, id mode) {
             if (kc == 53) g_running = 0;  // Esc
 
             // Don't pass it on. A keyDown that reaches the end of the responder chain
-            // unhandled makes AppKit beep — and holding a key down beeps per repeat.
+            // unhandled makes AppKit beep — and holding a key down beeps once per repeat.
             // The game has already taken it; forwarding it as well only asks Cocoa to
-            // find someone else to care, and the beep is Cocoa saying nobody did.
+            // find someone else who cares, and the beep is Cocoa saying nobody did.
             //
-            // Command still goes through, or the menu key equivalents (Cmd-Q most of
-            // all) stop working, and a window you can't quit is worse than a beep.
+            // Command-modified keys still go through, so the menu's equivalents work.
             unsigned long mods = MSG(unsigned long)(ev, SEL_("modifierFlags"));
             if (!(mods & (1UL << 20))) continue;   // NSEventModifierFlagCommand
         }
@@ -208,6 +207,25 @@ int main(int argc, char **argv) {
 
     id app = MSG(id)(CLS_("NSApplication"), SEL_("sharedApplication"));
     MSG(void, long)(app, SEL_("setActivationPolicy:"), 0);
+
+    // A menu bar with one item in it. Cmd-Q isn't a key the OS handles for you — it's a
+    // menu item's key equivalent, so an app with no menu has no Cmd-Q, and nobody thinks
+    // to check because every other Mac app has one. Ten lines, and the window closes the
+    // way a window is supposed to.
+    {
+        id bar = MSG(id)(MSG(id)(CLS_("NSMenu"), SEL_("alloc")), SEL_("init"));
+        id barItem = MSG(id)(MSG(id)(CLS_("NSMenuItem"), SEL_("alloc")), SEL_("init"));
+        MSG(void, id)(bar, SEL_("addItem:"), barItem);
+        MSG(void, id)(app, SEL_("setMainMenu:"), bar);
+
+        id menu = MSG(id)(MSG(id)(CLS_("NSMenu"), SEL_("alloc")), SEL_("init"));
+        id title = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), "Quit cvertex");
+        id key   = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), "q");
+        id quit  = MSG(id, id, SEL, id)(MSG(id)(CLS_("NSMenuItem"), SEL_("alloc")),
+                       SEL_("initWithTitle:action:keyEquivalent:"), title, SEL_("terminate:"), key);
+        MSG(void, id)(menu, SEL_("addItem:"), quit);
+        MSG(void, id)(barItem, SEL_("setSubmenu:"), menu);
+    }
 
     Class vc = objc_allocateClassPair((Class)objc_getClass("NSView"), "FBView", 0);
     class_addMethod(vc, SEL_("drawRect:"), (IMP)fbview_draw, "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
