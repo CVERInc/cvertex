@@ -122,12 +122,18 @@ int main(int argc, char **argv) {
     // The engine runs a game; which one is an argument. Nothing below this line knows
     // what the game is about.
     const Game *g = &game_vikings;
-    static const Game *const games[] = { &game_vikings, &game_title };
+    // Scripted input, one character per frame. This is the dividend a deterministic sim
+    // was always going to pay and I kept not collecting: the same string produces the
+    // same run, so a question like "does a flat shape fit through that gap" gets an
+    // answer instead of an opinion. It's also, exactly, a replay.
+    const char *keys = 0;
+    static const Game *const games[] = { &game_vikings, &game_title, &game_forms };
     #define NGAMES (int)(sizeof games / sizeof games[0])
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
         else if (!strcmp(argv[a], "--camz") && a + 1 < argc) { g_dev_camz = (int32_t)(atof(argv[a+1]) * 65536); a++; }
+        else if (!strcmp(argv[a], "--keys") && a + 1 < argc) { keys = argv[a+1]; a++; }
         else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
             g = 0;
             for (int k = 0; k < NGAMES; k++) if (!strcmp(argv[a+1], games[k]->name)) g = games[k];
@@ -147,7 +153,10 @@ int main(int argc, char **argv) {
             printf("\n");
             printf("  --res <w> <h>     framebuffer size (default: 640 360)\n");
             printf("  --fullscreen\n");
-            printf("  --camz <units>    override a game's camera distance (dev)\n\n");
+            printf("  --camz <units>    override a game's camera distance (dev)\n");
+            printf("  --keys <string>   scripted input, one char per frame, player 1:\n");
+            printf("                      . idle   l left   r right   j jump   u up/morph\n");
+            printf("                      uppercase does the same for player 2\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
             printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
@@ -156,6 +165,17 @@ int main(int argc, char **argv) {
         }
         else if (argv[a][0] == 0x2D && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
+    // One char of the script -> one frame of input.
+    #define SCRIPT(f) do { \
+        in[0] = (Input){ 0, 0, 0 }; in[1] = (Input){ 0, 0, 0 }; \
+        if (keys && (size_t)(f) < strlen(keys)) { \
+            char c = keys[f]; int p = (c >= 'A' && c <= 'Z') ? 1 : 0; \
+            char lc = (char)(p ? c - 'A' + 'a' : c); \
+            if (lc == 'l') in[p].x = -1; else if (lc == 'r') in[p].x = 1; \
+            else if (lc == 'j') in[p].act = 1; else if (lc == 'u') in[p].y = 1; \
+        } \
+    } while (0)
+
     fb_resize(rw, rh);
     g->init();
 
@@ -163,8 +183,10 @@ int main(int argc, char **argv) {
     if (runmode && !strcmp(runmode, "--headless")) {
         int n = modearg;
         for (int f = 0; f < n; f++) {
-            Input in[2] = { { (f / 17) % 3 - 1, 0, (f % 23) == 0 },
-                            { (f / 11) % 3 - 1, 0, (f % 31) == 0 } };
+            Input in[2];
+            if (keys) SCRIPT(f);
+            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, (f % 23) == 0 };
+                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, (f % 31) == 0 }; }
             g->tick(in);
         }
         g->draw();
@@ -179,8 +201,8 @@ int main(int argc, char **argv) {
     // things. A developer's eyes only, doesn't ship in a release build.
     if (runmode && !strcmp(runmode, "--ppm")) {
         int n = modearg;
-        Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
-        for (int f = 0; f < n; f++) g->tick(in);
+        Input in[2];
+        for (int f = 0; f < n; f++) { SCRIPT(f); g->tick(in); }
         g->draw();
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
@@ -193,8 +215,8 @@ int main(int argc, char **argv) {
     // --dump N: run N frames, print the framebuffer as ASCII. A developer's eyes only, doesn't ship in a release build.
     if (runmode && !strcmp(runmode, "--dump")) {
         int n = modearg;
-        Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
-        for (int f = 0; f < n; f++) g->tick(in);
+        Input in[2];
+        for (int f = 0; f < n; f++) { SCRIPT(f); g->tick(in); }
         g->draw();
         const char *ramp = " .:-=+*#%@";
         for (int y = 0; y < g_fbh; y += 8) {

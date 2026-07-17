@@ -37,5 +37,6 @@ typedef struct {
 // Every game defines one of these; the platform layer picks between them.
 extern const Game game_vikings;
 extern const Game game_title;
+extern const Game game_forms;
 
 #endif
