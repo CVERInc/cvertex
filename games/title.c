@@ -130,18 +130,45 @@ static void orient(int i, const int16_t *m) {
 }
 
 static int32_t lerp(int32_t a, int32_t b, int t) { return a + (int32_t)(((int64_t)(b - a) * t) >> 10); }
-static int ease(int t) {                       // smoothstep, 0..1024
-    if (t < 0) t = 0; else if (t > 1024) t = 1024;
-    return (int)(((int64_t)t * t * (3 * 1024 - 2 * t)) >> 21);
-}
+static int clamp01(int t) { return t < 0 ? 0 : (t > 1024 ? 1024 : t); }
 
-// Frames at 60Hz. The durations are cubeconjure's own.
-#define T_ROCK   300     // the C wobbles ~5s
-#define T_OUT     78     // explode into the cube (1.3s)
-#define T_MOVE    30     // one dance move (0.5s)
+// SceneKit's three timing modes, approximated. Theirs are cubic beziers; these are the
+// standard cheap equivalents, and the difference is well under a frame.
+static int ease_io(int t) { t = clamp01(t); return (int)(((int64_t)t * t * (3*1024 - 2*t)) >> 21); }
+static int ease_in(int t)  { t = clamp01(t); return (int)(((int64_t)t * t) >> 10); }
+static int ease_out(int t) { t = clamp01(t); int u = 1024 - t; return 1024 - (int)(((int64_t)u * u) >> 10); }
+
+// Frames at 60Hz. Every duration here is cubeconjure's, not a guess.
+#define T_ROCK   300     // the C wobbles 5s before it goes
+#define L1        17     // 0.28s  fly out to the shell, easeOut
+#define L_HOLD     6     // 0.10s  hold the spread
+#define L2A       16     // 0.26s  slide to the midpoint, easeInEaseOut
+#define L2B       16     // 0.26s  slide above the target, easeInEaseOut
+#define L3        20     // 0.34s  implode, easeIn
+#define T_OUT    (L1 + L_HOLD + L2A + L2B + L3)   // 75; the caller then waits 78
+#define T_WAIT   (78 - T_OUT)
+#define T_TURN    25     // 0.42s  one layer turn
+#define T_MOVE    30     // 0.50s  ...and the gap before the next
 #define T_DANCE  (T_MOVE * 12)
-#define T_IN      78     // explode back to the C (1.3s)
-#define T_TOTAL  (T_ROCK + T_OUT + T_DANCE + T_IN)
+#define T_IN     (T_OUT + T_WAIT)
+#define T_TOTAL  (T_ROCK + T_OUT + T_WAIT + T_DANCE + T_IN)
+#define T_UPRIGHT 33     // 0.55s  the root eases upright DURING the explosion
+#define T_SPINREV 840    // startSpin: a full turn every 14s
+
+// Walk the five baked waypoints on cubeconjure's schedule.
+static void path_at(const int16_t wp[5][3], int u, V3 *p) {
+    int seg, e;
+    if (u < L1)                              { seg = 0; e = ease_out(u * 1024 / L1); }
+    else if ((u -= L1) < L_HOLD)             { seg = 1; e = 0; }
+    else if ((u -= L_HOLD) < L2A)            { seg = 1; e = ease_io(u * 1024 / L2A); }
+    else if ((u -= L2A) < L2B)               { seg = 2; e = ease_io(u * 1024 / L2B); }
+    else if ((u -= L2B) < L3)                { seg = 3; e = ease_in(u * 1024 / L3); }
+    else                                     { seg = 4; e = 0; }
+    const int16_t *a = wp[seg], *b = wp[seg < 4 ? seg + 1 : 4];
+    p->x = lerp(a[0] * (U/1024), b[0] * (U/1024), e);
+    p->y = lerp(a[1] * (U/1024), b[1] * (U/1024), e);
+    p->z = lerp(a[2] * (U/1024), b[2] * (U/1024), e);
+}
 
 static uint32_t g_frame;
 
@@ -181,18 +208,22 @@ static void title_draw(uint32_t frame, int32_t camz) {
 
         if (t < T_ROCK) {                                   // the C, wobbling
             p = cp; mat = s->m;
-        } else if (t < T_ROCK + T_OUT) {                    // C -> cube
-            int e = ease((t - T_ROCK) * 1024 / T_OUT);
-            p.x = lerp(cp.x, h.x, e); p.y = lerp(cp.y, h.y, e); p.z = lerp(cp.z, h.z, e);
-            mat = (e < 512) ? s->m : 0;                     // the symmetry snaps at halfway
-        } else if (t < T_ROCK + T_OUT + T_DANCE) {          // the cube, dancing
+        } else if (t < T_ROCK + T_OUT + T_WAIT) {           // C -> cube
+            int u = t - T_ROCK;
+            path_at(PATH_TO_CUBE[i], u, &p);
+            // The orientation unwinds over l2a+l2b+l3, exactly as cubeconjure's rot does.
+            mat = (u < L1 + L_HOLD + (L2A + L2B + L3) / 2) ? s->m : 0;
+        } else if (t < T_ROCK + T_OUT + T_WAIT + T_DANCE) { // the cube, dancing
             p = h;
-            int mi = (t - T_ROCK - T_OUT) / T_MOVE;
-            int ph = ((t - T_ROCK - T_OUT) % T_MOVE) * 1024 / T_MOVE;
+            int d = t - T_ROCK - T_OUT - T_WAIT;
+            int mi = d / T_MOVE;
+            int ph = d % T_MOVE;
+            // 0.42s of turn, then 0.08s of rest — the pause is part of the rhythm.
+            int e = ph >= T_TURN ? 1024 : ease_io(ph * 1024 / T_TURN);
             int in_layer = 0;
-            for (int k = 0; k < 9; k++) if (DANCE_LAYER[mi][k] == i) in_layer = 1;
+            for (int k2 = 0; k2 < 9; k2++) if (DANCE_LAYER[mi][k2] == i) in_layer = 1;
             if (in_layer) {
-                int a = DANCE_QT[mi] * 256 * ease(ph) / 1024;
+                int a = DANCE_QT[mi] * 256 * e / 1024;
                 int axi = DANCE_AXIS[mi];
                 if (axi == 2) a = -a;                       // our Z points the other way
                 int32_t sn = g_sin[a & 1023], co = g_sin[(a + 256) & 1023];
@@ -206,9 +237,9 @@ static void title_draw(uint32_t frame, int32_t camz) {
                 p.x = px; p.y = py; p.z = pz;
             }
         } else {                                            // cube -> C
-            int e = ease((t - T_ROCK - T_OUT - T_DANCE) * 1024 / T_IN);
-            p.x = lerp(h.x, cp.x, e); p.y = lerp(h.y, cp.y, e); p.z = lerp(h.z, cp.z, e);
-            mat = (e < 512) ? 0 : s->m;
+            int u = t - T_ROCK - T_OUT - T_WAIT - T_DANCE;
+            path_at(PATH_TO_C[i], u, &p);
+            mat = (u < L1 + L_HOLD + (L2A + L2B + L3) / 2) ? 0 : s->m;
         }
 
         orient(i, mat);
@@ -218,20 +249,24 @@ static void title_draw(uint32_t frame, int32_t camz) {
         inst[i].scale = U;
     }
 
-    // The wobble and the self-spin are the SCENE's, not each cubie's — cubeconjure turns
-    // its root node and the children follow. Rotating 27 cubies instead only looks right
-    // while the angle is small.
-    int sx = rx, sy = ry, sz = rz;
-    if (t >= T_ROCK && t < T_ROCK + T_OUT) {                 // ease the wobble out
-        int e = ease((t - T_ROCK) * 1024 / T_OUT);
+    // The scene's own turn — cubeconjure rotates a root node and the children follow.
+    // Rotating each Inst instead spins 27 objects on the spot: close enough while the
+    // wobble is under 10 degrees, wrong the moment a cubie also turns for the dance.
+    int sx = 0, sy = 0, sz = 0;
+    if (t < T_ROCK) {
+        sx = rx; sy = ry; sz = rz;
+    } else if (t < T_ROCK + T_OUT + T_WAIT) {
+        // Don't pre-straighten (that pauses): ease the live tilt upright DURING the
+        // explosion, over 0.55s, so it flies apart from whatever angle it was at.
+        int e = ease_io((t - T_ROCK) * 1024 / T_UPRIGHT);
         sx = (int)((int64_t)rx * (1024 - e) >> 10);
         sy = (int)((int64_t)ry * (1024 - e) >> 10);
         sz = (int)((int64_t)rz * (1024 - e) >> 10);
-    } else if (t >= T_ROCK + T_OUT && t < T_ROCK + T_OUT + T_DANCE) {
-        sx = 0; sy = spin; sz = 0;
-    } else if (t >= T_ROCK + T_OUT + T_DANCE) {              // the explosion eases it upright
-        int e = ease((t - T_ROCK - T_OUT - T_DANCE) * 1024 / T_IN);
-        sx = 0; sy = (int)((int64_t)spin * (1024 - e) >> 10); sz = 0;
+    } else if (t < T_ROCK + T_OUT + T_WAIT + T_DANCE) {
+        sy = (int)((int64_t)(t - T_ROCK - T_OUT - T_WAIT) * 1024 / T_SPINREV);
+    } else {
+        int e = ease_io((t - T_ROCK - T_OUT - T_WAIT - T_DANCE) * 1024 / T_UPRIGHT);
+        sy = (int)((int64_t)((int64_t)T_DANCE * 1024 / T_SPINREV) * (1024 - e) >> 10);
     }
     g3d_scene(inst, N, camz, sx, sy, sz);
 }
