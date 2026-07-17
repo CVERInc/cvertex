@@ -33,7 +33,7 @@ static uint8_t g_events;
 #define FP 8
 typedef struct { int32_t x, y, vx, vy; int16_t facing; uint8_t grounded; } Actor;
 static Actor g_act[2];
-static static uint64_t g_checksum;
+static uint64_t g_checksum;
 
 static void init(void) {
     tables_init();
@@ -120,8 +120,7 @@ static void draw(void) {
         int32_t wx =  (cx - VW / 2) * wpp;
         int32_t wy = -(cyc - VH / 2) * wpp;
         int flip, residual;
-        int fc = g_demo_spin ? (int)((g_frame * 4) & 1023) : g_act[i].facing;
-        const Shape *v = turn_pick(&g_hero, fc, &flip, &residual);
+        const Shape *v = turn_pick(&g_hero, g_act[i].facing, &flip, &residual);
         if (v) shape_draw3d(v, wx, wy, CAMZ, 0, residual, 0, CH_SIZE, 9000, flip);
 #else
         // No art present (a clean checkout): a placeholder body, so the engine still runs.

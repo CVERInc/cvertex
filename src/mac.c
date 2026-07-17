@@ -113,14 +113,35 @@ int main(int argc, char **argv) {
     // The engine runs a game; which one is an argument. Nothing below this line knows
     // what the game is about.
     const Game *g = &game_vikings;
+    static const Game *const games[] = { &game_vikings, &game_title };
+    #define NGAMES (int)(sizeof games / sizeof games[0])
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
         else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
-            if (!strcmp(argv[a+1], "title")) g = &game_title;
-            else if (!strcmp(argv[a+1], "vikings")) g = &game_vikings;
-            else { fprintf(stderr, "unknown game: %s (have: vikings, title)\n", argv[a+1]); return 1; }
+            g = 0;
+            for (int k = 0; k < NGAMES; k++) if (!strcmp(argv[a+1], games[k]->name)) g = games[k];
+            if (!g) {
+                fprintf(stderr, "cvertex: no game called '%s'. Have:", argv[a+1]);
+                for (int k = 0; k < NGAMES; k++) fprintf(stderr, " %s", games[k]->name);
+                fprintf(stderr, "\n");
+                return 1;
+            }
             a++;
+        }
+        else if (!strcmp(argv[a], "--help") || !strcmp(argv[a], "-h")) {
+            printf("cvertex — a polygon engine that fits on a floppy\n\n");
+            printf("  --game <name>     which game to run (default: %s)\n", game_vikings.name);
+            printf("                    available:");
+            for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);
+            printf("\n");
+            printf("  --res <w> <h>     framebuffer size (default: 640 360)\n");
+            printf("  --fullscreen\n\n");
+            printf("  --headless <n>    run n frames, print checksums, no window\n");
+            printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
+            printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
+            printf("  vikings: A/D/W and the arrow keys drive one character each. Esc quits.\n");
+            return 0;
         }
         else if (argv[a][0] == 0x2D && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
@@ -186,7 +207,7 @@ int main(int argc, char **argv) {
     id win = MSG(id)(CLS_("NSWindow"), SEL_("alloc"));
     win = MSG(id, CGRect, unsigned long, unsigned long, BOOL)(win,
         SEL_("initWithContentRect:styleMask:backing:defer:"), r, 1 | 2 | 4, 2, NO);
-    id title = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), "spike");
+    id title = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), g->name);
     MSG(void, id)(win, SEL_("setTitle:"), title);
 
     id view = MSG(id)((id)vc, SEL_("alloc"));
