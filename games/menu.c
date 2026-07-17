@@ -83,15 +83,15 @@ static void init(void) {
 
 static void tick(const Input in[2]) {
     g_frame++;
-    // The list is a list, so up and down are the whole interface.
-    int mv = (in[0].y || in[1].y) ? -1 : 0;
-    if (in[0].x || in[1].x) mv = (in[0].x + in[1].x) > 0 ? 1 : -1;
+    // A list is a list, so up and down are the whole interface — and left/right do the
+    // same thing, because someone will try them.
+    int y = in[0].y + in[1].y, x = in[0].x + in[1].x;
+    int mv = y ? (y > 0 ? -1 : 1) : (x ? (x > 0 ? 1 : -1) : 0);
     if (g_cool > 0) { g_cool--; return; }
-    if (mv) {
-        g_sel = (g_sel + mv + g_n) % g_n;
-        g_cool = 10;
-    }
-    if ((in[0].act || in[1].act) && g_n) g_switch_to = g_list[g_sel];
+    if (mv) { g_sel = (g_sel + mv + g_n) % g_n; g_cool = 10; }
+    // W and Up are also "up", so they'd fire the instant you arrived here. Space and
+    // Return are the same act bit with no y — that's the difference, and it's free.
+    if ((in[0].act || in[1].act) && !y && g_n) g_switch_to = g_list[g_sel];
 }
 
 static void audio(void) {}
@@ -119,8 +119,8 @@ static void draw(void) {
              g_list[i]->name, (uint8_t)(i == g_sel ? 2 : 1));
     }
 
-    text(cx - width("ARROWS  W TO START  ESC QUITS", s) / 2, g_fbh - g_fbh / 6, s,
-         "ARROWS  W TO START  ESC QUITS", 1);
+    text(cx - width("ARROWS   SPACE TO START   ESC QUITS", s) / 2, g_fbh - g_fbh / 6, s,
+         "ARROWS   SPACE TO START   ESC QUITS", 1);
 }
 
 static uint64_t checksum(void) { return (uint64_t)g_sel; }

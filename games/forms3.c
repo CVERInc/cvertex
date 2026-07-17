@@ -130,7 +130,7 @@ static void tick(const Input in[2]) {
         // Cycling your own form is a TEST AFFORDANCE and a lie about the design: the whole
         // point is that someone else does this to you. It's here so "does shape decide
         // passage" can be answered before "who decides your shape" exists.
-        if (in[i].y > 0) {
+        if (in[i].y < 0) {          // S / down — up is jump now
             uint8_t want = (uint8_t)((a->form + 1) % NFORM);
             if (!hits(a->x, a->y, a->z, want, a->dir)) { a->form = want; g_events |= EV_MORPH; }
             // Refusing to grow inside a wall isn't politeness — it's the only thing keeping

@@ -108,11 +108,24 @@ static void pump_events(id app, id mode) {
     }
 }
 
-// Keyboard → input for two characters. Local co-op is established right here:
-// character A reads A/D/W, character B reads ←/→/↑. The sim doesn't know or care where input comes from.
+// Keyboard → input for two characters. Local co-op is established right here: character A
+// reads WASD, character B reads the arrows. The sim doesn't know or care where input comes
+// from.
+//
+// 🔴 y was hard-coded to 0 for weeks. Nothing on a keyboard could ever produce it, so the
+// menu's up/down did nothing and forms' morph key never once fired — while --keys set y
+// happily, so every test passed. A test rig that can reach somewhere the player can't is
+// a test rig that verifies a game nobody is playing.
 static void read_input(Input in[2]) {
-    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]), 0, g_keys[13] };      // D-A, W
-    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]), 0, g_keys[126] }; // →-←, ↑
+    // W and Up are both "up" and "jump", because in a platformer they're the same thought.
+    // Space and Return are act WITHOUT up, which is what lets a menu tell "move" from
+    // "choose" using the one act bit everybody already has.
+    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]),                    // D - A
+                     (int8_t)(g_keys[13] - g_keys[1]),                   // W - S
+                     (uint8_t)(g_keys[13] | g_keys[49]) };               // W or space
+    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),                // -> - <-
+                     (int8_t)(g_keys[126] - g_keys[125]),                // up - down
+                     (uint8_t)(g_keys[126] | g_keys[36]) };              // up or return
 }
 
 int main(int argc, char **argv) {
@@ -160,7 +173,7 @@ int main(int argc, char **argv) {
             printf("  --fullscreen\n");
             printf("  --camz <units>    override a game's camera distance (dev)\n");
             printf("  --keys <string>   scripted input, one char per frame, player 1:\n");
-            printf("                      . idle   l left   r right   j jump   u up/morph\n");
+            printf("                      . idle   l left   r right   j jump   u up   d down\n");
             printf("                      uppercase does the same for player 2\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
@@ -177,7 +190,8 @@ int main(int argc, char **argv) {
             char c = keys[f]; int p = (c >= 'A' && c <= 'Z') ? 1 : 0; \
             char lc = (char)(p ? c - 'A' + 'a' : c); \
             if (lc == 'l') in[p].x = -1; else if (lc == 'r') in[p].x = 1; \
-            else if (lc == 'j') in[p].act = 1; else if (lc == 'u') in[p].y = 1; \
+            else if (lc == 'j') { in[p].act = 1; in[p].y = 1; } \
+            else if (lc == 'u') in[p].y = 1; else if (lc == 'd') in[p].y = -1; \
         } \
     } while (0)
 
