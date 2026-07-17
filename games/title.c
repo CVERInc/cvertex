@@ -14,8 +14,76 @@
 #include "game.h"
 
 #define N 27
-#define U (1 << 16)          // one world unit
-#define GAP (U * 11 / 10)    // cubie spacing: a little air between them
+#define U (1 << 16)               // one world unit
+#define GAP (U * 104 / 100)       // 1.04 centre-to-centre — cubeconjure's own spacing
+
+// cubeconjure's palette, read out of its source rather than remembered. A Rubik's cube
+// with one colour isn't a Rubik's cube, it's 27 boxes — and its layer turns are
+// invisible, which is the real reason the first cut of this looked dead.
+//
+// Stickers go on TRUE OUTER FACES ONLY; every inner face is black plastic. That's
+// cubeconjure's rule verbatim, and it's what a burst is supposed to reveal.
+#define PAL_STICKER 8            // 6 colours x 8 shades
+#define PAL_PLASTIC 56           // + 8
+static const uint32_t FACE_RGB[6] = {
+    0xFFF23A35,   // +X  R
+    0xFFFF9519,   // -X  L
+    0xFFF5F5F8,   // +Y  U
+    0xFFFFD62E,   // -Y  D
+    0xFF338CFA,   // +Z  B
+    0xFF33C759,   // -Z  F  (our -Z faces the camera)
+};
+#define PLASTIC_RGB 0xFF26262C
+
+// One shade ramp per material: same hue, eight brightnesses. Lighting picks a step.
+static void ramp(int base, uint32_t rgb) {
+    for (int i = 0; i < 8; i++) {
+        int m = 40 + i * 30;   // 40..250
+        int r = (int)((rgb >> 16) & 255) * m / 255;
+        int g = (int)((rgb >> 8) & 255) * m / 255;
+        int b = (int)(rgb & 255) * m / 255;
+        g_pal[base + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    }
+}
+
+// The 27 cubies, built at init instead of baked as const: each one needs its OWN face
+// colours (a corner shows three stickers, a centre one, the core none), and 27 const
+// meshes would be 27 copies of the same eight vertices.
+static V3   cub_v[N][8];
+static Tri  cub_t[N][12];
+static Mesh cub_m[N];
+
+static void build_cubies(void) {
+    static const int8_t VP[8][3] = { {-1,-1,-1},{1,-1,-1},{1,1,-1},{-1,1,-1},
+                                     {-1,-1, 1},{1,-1, 1},{1,1, 1},{-1,1, 1} };
+    // face -> its four vertices, and its outward normal
+    static const uint8_t FQ[6][4] = { {1,5,6,2},{4,0,3,7},{3,2,6,7},{4,5,1,0},{5,4,7,6},{0,1,2,3} };
+    static const int8_t FN[6][3]  = { {1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1} };
+
+    for (int i = 0; i < N; i++) {
+        int gx = i % 3 - 1, gy = (i / 3) % 3 - 1, gz = i / 9 - 1;
+        for (int v = 0; v < 8; v++) {
+            cub_v[i][v].x = VP[v][0] * (U / 2);
+            cub_v[i][v].y = VP[v][1] * (U / 2);
+            cub_v[i][v].z = VP[v][2] * (U / 2);
+        }
+        for (int f = 0; f < 6; f++) {
+            int outer = (FN[f][0] && gx == FN[f][0]) || (FN[f][1] && gy == FN[f][1])
+                     || (FN[f][2] && gz == FN[f][2]);
+            uint8_t ci = outer ? (uint8_t)(PAL_STICKER + f * 8) : PAL_PLASTIC;
+            for (int k = 0; k < 2; k++) {
+                Tri *t = &cub_t[i][f * 2 + k];
+                t->a = FQ[f][0]; t->b = FQ[f][1 + k]; t->c = FQ[f][2 + k];
+                t->ci = ci;
+                t->nx = (int16_t)(FN[f][0] * 32767);
+                t->ny = (int16_t)(FN[f][1] * 32767);
+                t->nz = (int16_t)(FN[f][2] * 32767);
+            }
+        }
+        cub_m[i].v = cub_v[i]; cub_m[i].nv = 8;
+        cub_m[i].t = cub_t[i]; cub_m[i].nt = 12;
+    }
+}
 
 // The 27 cubies of a 3x3x3, in x-major order.
 static void home(int i, V3 *p) {
@@ -139,7 +207,7 @@ static void title_draw(uint32_t frame, int32_t camz) {
             }
         }
 
-        inst[i].m = &g_cube;
+        inst[i].m = &cub_m[i];
         inst[i].pos = p;
         inst[i].ax = ax; inst[i].ay = ay; inst[i].az = az;
         inst[i].scale = scale;
@@ -153,13 +221,14 @@ static void title_draw(uint32_t frame, int32_t camz) {
 
 static uint32_t g_frame;
 
-static void init(void) { tables_init(); g_frame = 0;
+static void init(void) {
+    tables_init();
+    g_frame = 0;
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
     g_pal[0] = 0xFF1A1C2C;
-    for (int i = 0; i < 8; i++) {
-        int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
-        g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-    }
+    for (int f = 0; f < 6; f++) ramp(PAL_STICKER + f * 8, FACE_RGB[f]);
+    ramp(PAL_PLASTIC, PLASTIC_RGB);
+    build_cubies();
 }
 static void tick(const Input in[2]) { (void)in; g_frame++; }
 static void audio(void) {}
