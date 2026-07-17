@@ -24,27 +24,46 @@ shipping full 3D — silicon was. A SNES needed an extra chip in the cartridge t
 draw wireframes at all. The floppy still fits; the hardware caught up. cvertex
 is what you get when you take the old budget and the new machine.
 
-Current cost, macOS, everything below included:
+Current cost, macOS:
 
 | | binary | machine code |
 |---|---|---|
 | Empty Cocoa shell (control) | 33,592 | 0 |
-| + rasterizer, sim, platform layer, input | 35,256 | 2,996 |
-| + FM synth, tracker, music | 35,976 | 5,036 |
-| + full 3D pipeline | **36,248** | **6,352** |
-| Share of one floppy | **2.45%** | |
+| The whole engine | 53,016 | **7,744** |
+| + a character drawn from seven angles | 102,904 | 9,364 |
+| Share of one floppy | **6.97%** | |
 
-Almost all of that is Mach-O container overhead, not engine. The 3D pipeline —
-rotation, projection, backface culling, depth sorting, flat-shaded lighting —
-costs 1,316 bytes.
+7,744 bytes of machine code is the rasterizer, the deterministic sim, the macOS
+platform layer, an FM synth with a tracker, the fixed-point 3D pipeline, and the
+vector-art pipeline. Most of the binary is Mach-O container overhead, not engine;
+most of the rest is artwork.
+
+Resolution is a runtime number, and the framebuffer is `__bss` — zerofill — so it
+costs nothing on disk. Measured on one core, no GPU:
+
+| | |
+|---|---|
+| 320x180 | 18,047 fps |
+| 640x360 | 12,774 fps |
+| 1920x1080 | 2,138 fps |
+| **3840x2160** | **540 fps** |
+
+Which is the argument in one table. Nothing in here is new: palette indices, scanline
+fills, fixed point, painter's algorithm. A 486 could not fill 8.3M pixels. This machine
+does it 540 times a second, with nine frames of headroom left over.
 
 ## Features
 
 - **Palette-indexed software rendering.** One byte per pixel, 256 colours, no GPU.
 - **Fixed-point 3D.** Not one float in the pipeline. Deterministic on every machine.
 - **Synthesized audio.** 2-op FM plus classic waveforms. No wav, no ogg, no decoder.
-- **Deterministic simulation.** Same inputs, same frame, forever. Replays and
-  lockstep multiplayer come free.
+- **Deterministic simulation.** Same inputs, same frame, forever — at any resolution,
+  because gameplay lives in a virtual space the display can't reach. Replays and lockstep
+  multiplayer come free.
+- **Vector characters.** Drawings in, polygons out, extruded into the 3D world. Turn to
+  the drawn view nearest the facing, then keep rotating the rest of the way.
+- **Chunky or sharp is a number.** 640x360 scaled up is a 1994 pixel grid; the display's
+  own resolution is the same polygons, sharp. Same art, same binary.
 - **Local co-op from day one.** The simulation never learns where input came from.
 - **Zero dependencies.** A C compiler is the whole toolchain.
 
@@ -54,12 +73,15 @@ costs 1,316 bytes.
 ./build.sh && ./cvertex
 ```
 
-A/D/W drives one character, arrow keys drive the other, Esc quits. Every build
-prints its size against the floppy budget.
+A/D/W drives one character, arrow keys drive the other, Esc quits. Every build prints
+its size against the floppy budget.
 
 ```sh
-./cvertex --headless 3600   # same inputs must give the same checksum
-./cvertex --dump 40         # print the framebuffer as ASCII
+./cvertex --res 1920 1080   # any resolution; the art is vector
+./cvertex --fullscreen
+./cvertex --headless 3600   # same inputs must give the same checksum, at any --res
+./cvertex --dump 40         # framebuffer as ASCII
+./cvertex --ppm 40          # framebuffer as a PPM on stdout
 ```
 
 ## How it works
@@ -126,13 +148,45 @@ effectively free.
 
 ### Assets are baked, not loaded
 
-`tools/obj2mesh` turns any `.obj` into a `const` C array at build time. No
-loader, no file format, no I/O, no error handling — and `const` data lives in a
-`__TEXT` page that was already there.
+`tools/obj2mesh` turns any `.obj` into a `const` C array at build time; `tools/svg2poly`
+does the same for vector art. No loader, no file format, no I/O, no error handling — and
+`const` data lives in a `__TEXT` page that was already there.
 
-Vertex normals in the file are ignored: flat shading wants face normals, so they
-are computed from geometry. Any tool's `.obj` works, whether or not it writes
-normals.
+The engine never learns what SVG is. SVG is an authoring format: the full spec is a
+monster and implementing it would eat the whole floppy. Curves flatten and colours
+cluster at build time; the engine receives points and a palette index.
+
+Vertex normals in an `.obj` are ignored — flat shading wants face normals, so they come
+from geometry, which also means any tool's output works.
+
+### Drawings become characters
+
+A character is drawn from several angles, traced to polygons, and extruded: the
+silhouette grows walls, the artwork stays flat on the front. Nothing is triangulated —
+`poly_fill` only ever wanted screen coordinates and never cared where they came from, so
+shape points ride the same transform as meshes.
+
+`turn_pick` picks the drawn view nearest the facing and hands the leftover angle back, so
+the chosen view keeps rotating the rest of the way. Doom snapped and you could see it
+snap; here the drawing changes on a step and the motion doesn't. A gap in the sheet
+costs accuracy, not correctness.
+
+Three things about this are load-bearing, and each was a bug first:
+
+- **Every view carries its own angle.** Assuming even spacing put the front view at 180°.
+  An artist draws the angles a character needs, not the angles a formula wants. Which
+  angle reads as screen-right is a property of the art too — read the sheet.
+- **Mirroring is opt-in, never automatic.** Reflecting one half is free and it is wrong
+  for any design that isn't symmetric: a scar, a satchel, a parting all jump sides, and it
+  looks completely normal until someone notices. Bytes are the cheapest thing here.
+- **Quantize the source before tracing.** A flat-coloured illustration turned out to hold
+  3,004 distinct colours; about eleven were the artist's and the rest were anti-aliasing.
+  A tracer can't tell those apart, so every blended edge pixel became a real, thin,
+  spurious fill. Snapping the source to its own flat colours first (nearest in CIE76 Lab)
+  took it to 14. And trace on a key colour, never on transparency: transparent composites
+  to white, white artwork merges with it, and the tracer discards it as background — a
+  white-haired character arrives with a hole where her hair was, which still looks right
+  on a white page because you are seeing the page through her.
 
 ## Size discipline
 
@@ -141,7 +195,7 @@ Two rules earn their place in the budget.
 **Static variables are zero-initialized; assign at runtime.** A non-zero
 initializer creates `__data`, and macOS aligns segments to 16 KB — so four bytes
 of initial value drag 16,384 bytes into the file. Zero-initialized data lives in
-`__bss` and costs nothing on disk. The 320×180 framebuffer is free.
+`__bss` and costs nothing on disk. The framebuffer is free at any size — up to 4K.
 
 **Measure, don't guess.** Every build prints its size. The first synth clipped
 through its whole range and sounded merely "a bit dirty"; the meter said peak
@@ -152,6 +206,8 @@ through its whole range and sounded merely "a bit dirty"; the meter said peak
 Early. It runs, and the shape of it is settled.
 
 - macOS only. The Windows and Linux platform layers aren't written yet.
+- The engine ships with no artwork. `tools/svg2poly` bakes a character in; without one
+  it draws placeholder polygons.
 - Near-plane handling drops any triangle with a vertex behind the camera rather
   than clipping it properly. Invisible until geometry crosses the lens.
 - Depth sorting is per-triangle painter's algorithm, so interpenetrating
