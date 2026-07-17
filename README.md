@@ -2,7 +2,7 @@
 
 > **Draws a world out of shapes instead of bitmaps.** cvertex (C + vertex) is a game
 > engine you can read in an afternoon: a software rasterizer, a fixed-point 3D pipeline,
-> an FM synth and a deterministic simulation, in eleven kilobytes of machine code and no
+> an FM synth and a deterministic simulation, in a few thousand lines of C with no
 > dependencies at all.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -36,22 +36,22 @@ headroom left over — running code its authors would have recognised on sight.
 
 What that buys, beyond the number: an engine small enough to hold in your head. You can
 read all of it, so you can trust all of it, and you can change any of it without
-wondering what else knows about it. It's not a big claim — here is all of it:
+wondering what else knows about it. It isn't a big claim — this is all of it:
 
-| | machine code | |
-|---|---|---|
-| `src/core.c` | 1,248 | framebuffer, palette, scanline fill |
-| `src/g3d.c` | 2,868 | the fixed-point 3D pipeline |
-| `src/shape.c` | 1,808 | vector art: extrusion, turnarounds |
-| `src/synth.c` | 1,424 | FM synth, oscillators, tracker |
-| `src/mac.c` | 3,400 | the macOS platform layer |
-| **the engine** | **10,748** | |
-| `games/vikings.c` | 1,004 | two characters, gravity, a floor |
-| `games/title.c` | 2,336 | 27 cubies that spell a letter |
+| | |
+|---|---|
+| `src/core.c` | framebuffer, palette, scanline fill |
+| `src/g3d.c` | the fixed-point 3D pipeline |
+| `src/shape.c` | vector art: extrusion, turnarounds |
+| `src/synth.c` | FM synth, oscillators, tracker |
+| `src/mac.c` | the macOS platform layer |
+| `src/game.h` | the line between the engine and a game |
+| `games/*.c` | the games |
 
-A linked binary is bigger than the sum of its parts is small: about 33 KB of it is Mach-O
-container overhead before a line of ours, and baked artwork is bigger than all the code.
-Neither is the engine.
+The engine's machine code currently rounds to about eleven kilobytes, but that number is
+`./build.sh`'s to report, not this file's to remember. A linked binary is much larger and
+says much less: some 33 KB of it is Mach-O container overhead before a line of ours, and
+baked artwork outweighs all the code. Neither is the engine.
 
 ## Features
 
