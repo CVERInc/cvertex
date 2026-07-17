@@ -90,6 +90,16 @@ static void pump_events(id app, id mode) {
             unsigned short kc = MSG(unsigned short)(ev, SEL_("keyCode"));
             if (kc < 128) g_keys[kc] = (t == 10);
             if (kc == 53) g_running = 0;  // Esc
+
+            // Don't pass it on. A keyDown that reaches the end of the responder chain
+            // unhandled makes AppKit beep — and holding a key down beeps per repeat.
+            // The game has already taken it; forwarding it as well only asks Cocoa to
+            // find someone else to care, and the beep is Cocoa saying nobody did.
+            //
+            // Command still goes through, or the menu key equivalents (Cmd-Q most of
+            // all) stop working, and a window you can't quit is worse than a beep.
+            unsigned long mods = MSG(unsigned long)(ev, SEL_("modifierFlags"));
+            if (!(mods & (1UL << 20))) continue;   // NSEventModifierFlagCommand
         }
         MSG(void, id)(app, SEL_("sendEvent:"), ev);
     }
