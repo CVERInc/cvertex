@@ -68,7 +68,7 @@ static const Box SOLID[] = {
 #define NSOLID (int)(sizeof SOLID / sizeof SOLID[0])
 
 // ---- actors -----------------------------------------------------------------
-typedef struct { int32_t x, y, vx, vy; uint8_t form, grounded; } Actor;
+typedef struct { int32_t x, y, vx, vy; uint8_t form, grounded, prev_act; } Actor;
 static Actor g_act[2];
 static uint64_t g_checksum;
 static uint8_t g_events;
@@ -105,8 +105,8 @@ static void move_axis(Actor *a, int32_t dx, int32_t dy) {
 
 static void init(void) {
     tables_init();
-    g_act[0] = (Actor){ 300 << FP, FLOOR_Y << FP, 0, 0, F_UPRIGHT, 0 };
-    g_act[1] = (Actor){ 340 << FP, FLOOR_Y << FP, 0, 0, F_UPRIGHT, 0 };
+    g_act[0] = (Actor){ 300 << FP, FLOOR_Y << FP, 0, 0, F_UPRIGHT, 0, 0 };
+    g_act[1] = (Actor){ 340 << FP, FLOOR_Y << FP, 0, 0, F_UPRIGHT, 0, 0 };
     g_checksum = 0;
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
     g_pal[0]  = 0xFF1A1C2C;   // sky
@@ -125,7 +125,13 @@ static void tick(const Input in[2]) {
         // whole point is that you can't do this to yourself. It's here so the question
         // "does shape decide passage" can be answered before the answer to "who decides
         // your shape" exists.
-        if (in[i].act) {            // E / right-shift
+        // 🔴 Edge, not level. act is "held", and a verb that reads it fires every frame — hold
+        // the key for a second and the form cycles sixty times. Whether a verb repeats is a
+        // design question (holding jump is bunny-hopping, which some games want), so the
+        // platform can't answer it and the game has to.
+        int pressed = in[i].act && !a->prev_act;
+        a->prev_act = in[i].act;
+        if (pressed) {
             uint8_t want = (uint8_t)((a->form + 1) % NFORM);
             if (!overlaps(a->x, a->y, want)) { a->form = want; g_events |= EV_MORPH; }
             // Refusing to grow inside a wall is not politeness, it's the only thing
