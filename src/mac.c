@@ -13,6 +13,7 @@
 #include <string.h>
 #include "core.h"
 #include "synth.h"
+#include "game.h"
 
 #define SEL_(s) sel_registerName(s)
 #define CLS_(s) ((id)objc_getClass(s))
@@ -21,7 +22,6 @@
 static uint32_t g_rgba[MAXFBW * MAXFBH];
 static uint8_t  g_keys[128];
 static int      g_running;   // see synth.c's 16KB lesson: assign the initial value at runtime, never give it a non-zero initializer
-extern uint64_t g_checksum;
 
 // framebuffer (palette indices) → RGBA, then blit into the window. That's the whole of "display."
 static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
@@ -79,12 +79,6 @@ static void audio_start(void) {
     AudioOutputUnitStart(au);
 }
 
-// sim emits events → translated into sound here. The sim has no idea sound effects exist.
-static void play_events(void) {
-    if (g_events & (EV_JUMP_A | EV_JUMP_B)) synth_note(NCHAN - 1, 5, (g_events & EV_JUMP_A) ? 84 : 79, 180);
-    if (g_events & (EV_LAND_A | EV_LAND_B)) synth_note(NCHAN - 1, 4, 48, 140);
-}
-
 static void pump_events(id app, id mode) {
     id past = MSG(id)(CLS_("NSDate"), SEL_("distantPast"));
     for (;;) {
@@ -116,13 +110,22 @@ int main(int argc, char **argv) {
     // sharp. Same art, same binary.
     int rw = 640, rh = 360, fullscreen = 0;
     const char *runmode = 0; int modearg = 0;
+    // The engine runs a game; which one is an argument. Nothing below this line knows
+    // what the game is about.
+    const Game *g = &game_vikings;
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
+        else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
+            if (!strcmp(argv[a+1], "title")) g = &game_title;
+            else if (!strcmp(argv[a+1], "vikings")) g = &game_vikings;
+            else { fprintf(stderr, "unknown game: %s (have: vikings, title)\n", argv[a+1]); return 1; }
+            a++;
+        }
         else if (argv[a][0] == 0x2D && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
     fb_resize(rw, rh);
-    sim_init();
+    g->init();
 
     // --headless N: no window, run N frames, print the checksum. Used to verify determinism.
     if (runmode && !strcmp(runmode, "--headless")) {
@@ -130,12 +133,12 @@ int main(int argc, char **argv) {
         for (int f = 0; f < n; f++) {
             Input in[2] = { { (f / 17) % 3 - 1, 0, (f % 23) == 0 },
                             { (f / 11) % 3 - 1, 0, (f % 31) == 0 } };
-            sim_tick(in);
+            g->tick(in);
         }
-        sim_draw();
+        g->draw();
         uint64_t ink = 0;
         for (int i = 0; i < g_fbw * g_fbh; i++) ink = ink * 3 + g_fb[i];
-        printf("frames=%d sim_checksum=%llu fb_checksum=%llu\n", n, g_checksum, ink);
+        printf("game=%s frames=%d sim_checksum=%llu fb_checksum=%llu\n", g->name, n, g->checksum(), ink);
         return 0;
     }
 
@@ -145,8 +148,8 @@ int main(int argc, char **argv) {
     if (runmode && !strcmp(runmode, "--ppm")) {
         int n = modearg;
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
-        for (int f = 0; f < n; f++) sim_tick(in);
-        sim_draw();
+        for (int f = 0; f < n; f++) g->tick(in);
+        g->draw();
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
             uint32_t c = g_pal[g_fb[i]];
@@ -159,8 +162,8 @@ int main(int argc, char **argv) {
     if (runmode && !strcmp(runmode, "--dump")) {
         int n = modearg;
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
-        for (int f = 0; f < n; f++) sim_tick(in);
-        sim_draw();
+        for (int f = 0; f < n; f++) g->tick(in);
+        g->draw();
         const char *ramp = " .:-=+*#%@";
         for (int y = 0; y < g_fbh; y += 8) {
             for (int x = 0; x < g_fbw; x += 4) {
@@ -214,9 +217,9 @@ int main(int argc, char **argv) {
         if (MSG(BOOL)(win, SEL_("isVisible")) == NO) break;
 
         Input in[2]; read_input(in);
-        sim_tick(in);
-        play_events();
-        sim_draw();
+        g->tick(in);
+        g->audio();
+        g->draw();
         MSG(void, BOOL)(view, SEL_("setNeedsDisplay:"), YES);
         MSG(void)(view, SEL_("displayIfNeeded"));
 

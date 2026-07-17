@@ -1,4 +1,6 @@
-// title.c — the title sequence. A cube of 27 cubies bursts apart, spells a letter,
+// title.c — the title sequence, as a game with no input.
+//
+// A cube of 27 cubies bursts apart, spells a letter,
 // bursts again, and packs itself back into a cube that scrambles.
 //
 // It exists as a test as much as a title: 27 instances is the smallest scene that can
@@ -9,7 +11,7 @@
 // of the frame counter, so it replays identically and it can't desync.
 #include "core.h"
 #include "g3d.h"
-#include "title.h"
+#include "game.h"
 
 #define N 27
 #define U (1 << 16)          // one world unit
@@ -66,7 +68,7 @@ static int ease(int t) {
 #define T_SCRAM 200
 #define T_TOTAL (T_CUBE + T_OUT1 + T_C + T_OUT2 + T_IN + T_SCRAM)
 
-void title_draw(uint32_t frame, int32_t camz) {
+static void title_draw(uint32_t frame, int32_t camz) {
     static Inst inst[N];
     int t = (int)(frame % T_TOTAL);
     int spin = (int)((frame * 2) & 1023);
@@ -145,3 +147,23 @@ void title_draw(uint32_t frame, int32_t camz) {
 
     g3d_scene(inst, N, camz);
 }
+
+
+// ---- the game -------------------------------------------------------------
+
+static uint32_t g_frame;
+
+static void init(void) { tables_init(); g_frame = 0;
+    for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
+    g_pal[0] = 0xFF1A1C2C;
+    for (int i = 0; i < 8; i++) {
+        int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
+        g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    }
+}
+static void tick(const Input in[2]) { (void)in; g_frame++; }
+static void audio(void) {}
+static void draw(void) { fb_clear(0); title_draw(g_frame, 12 << 16); }
+static uint64_t checksum(void) { return g_frame; }
+
+const Game game_title = { "title", init, tick, audio, draw, checksum };
