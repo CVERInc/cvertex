@@ -20,6 +20,20 @@ extern const Mesh g_torus;
 // ax/ay/az: angle 0..1023 (a direct index into g_sin). tz: camera distance, 16.16.
 void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz);
 
+// One mesh, placed. Several of these make a scene.
+typedef struct {
+    const Mesh *m;
+    V3   pos;            // world position, 16.16
+    int  ax, ay, az;     // rotation
+    int32_t scale;       // 16.16; 1<<16 = the mesh's own size
+} Inst;
+
+// 🔴 Draw a whole scene at once, because a painter's algorithm sorted per MESH is not
+// sorted. Draw two meshes one after the other and every triangle of the second lands on
+// top of the first, whatever the depth says. The sort has to see the entire scene, so
+// the scene has to be a list, not a sequence of calls.
+void g3d_scene(const Inst *inst, int ninst, int32_t camz);
+
 // The transform, exposed so flat vector shapes ride the SAME pipeline as meshes
 // instead of growing a second one. Anything that can produce three coordinates gets
 // to be 3D — that is the whole trick behind extrusion.

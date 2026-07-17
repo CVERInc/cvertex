@@ -122,3 +122,74 @@ static const Tri cube_t[12] = {
     { 3, 2, 6, 8,  0, N,  0 }, { 3, 6, 7, 8,  0, N,  0 },   // top
 };
 const Mesh g_cube = { cube_v, 8, cube_t, 12 };
+
+// ---- scenes -----------------------------------------------------------------
+
+#define MAXSV 8192
+#define MAXST 16384
+
+static int32_t sv_x[MAXSV], sv_y[MAXSV], sv_z[MAXSV];
+static int16_t sv_sx[MAXSV], sv_sy[MAXSV];
+static struct { uint16_t a, b, c; uint8_t ci; int32_t depth; } st[MAXST];
+
+void g3d_scene(const Inst *inst, int ninst, int32_t camz) {
+    int nv = 0, nt = 0;
+
+    for (int i = 0; i < ninst; i++) {
+        const Inst *in = &inst[i];
+        const Mesh *m = in->m;
+        int base = nv;
+        if (nv + m->nv > MAXSV) break;
+
+        for (int v = 0; v < m->nv; v++) {
+            int32_t x = (int32_t)(((int64_t)m->v[v].x * in->scale) >> 16);
+            int32_t y = (int32_t)(((int64_t)m->v[v].y * in->scale) >> 16);
+            int32_t z = (int32_t)(((int64_t)m->v[v].z * in->scale) >> 16);
+            g3d_rot(&x, &y, &z, in->ax, in->ay, in->az);
+            x += in->pos.x; y += in->pos.y; z += in->pos.z + camz;
+            sv_x[nv] = x; sv_y[nv] = y; sv_z[nv] = z;
+            g3d_project(x, y, z, &sv_sx[nv], &sv_sy[nv]);
+            nv++;
+        }
+
+        for (int t = 0; t < m->nt && nt < MAXST; t++) {
+            const Tri *tr = &m->t[t];
+            int a = base + tr->a, b = base + tr->b, c = base + tr->c;
+            if (sv_z[a] < NEAR || sv_z[b] < NEAR || sv_z[c] < NEAR) continue;
+
+            int32_t nx = tr->nx, ny = tr->ny, nz = tr->nz;
+            g3d_rot(&nx, &ny, &nz, in->ax, in->ay, in->az);
+            int32_t cx = (sv_x[a] + sv_x[b] + sv_x[c]) / 3;
+            int32_t cy = (sv_y[a] + sv_y[b] + sv_y[c]) / 3;
+            int32_t cz = (sv_z[a] + sv_z[b] + sv_z[c]) / 3;
+            if ((int64_t)nx * cx + (int64_t)ny * cy + (int64_t)nz * cz >= 0) continue;
+
+            int shade = (-nz * 8) >> 15;
+            if (shade < 0) shade = 0; else if (shade > 7) shade = 7;
+            st[nt].a = (uint16_t)a; st[nt].b = (uint16_t)b; st[nt].c = (uint16_t)c;
+            st[nt].ci = (uint8_t)(tr->ci + shade);
+            st[nt].depth = sv_z[a] + sv_z[b] + sv_z[c];
+            nt++;
+        }
+    }
+
+    // Far to near, across every instance at once. Insertion sort: these scenes are
+    // hundreds of triangles and it costs a handful of lines. Bucket by depth if a scene
+    // ever gets big enough to care.
+    for (int i = 1; i < nt; i++) {
+        int j = i - 1;
+        while (j >= 0 && st[j].depth < st[i].depth) j--;
+        if (j != i - 1) {
+            __typeof__(st[0]) tmp = st[i];
+            for (int k = i; k > j + 1; k--) st[k] = st[k - 1];
+            st[j + 1] = tmp;
+        }
+    }
+
+    for (int i = 0; i < nt; i++) {
+        int16_t p[6] = { sv_sx[st[i].a], sv_sy[st[i].a],
+                         sv_sx[st[i].b], sv_sy[st[i].b],
+                         sv_sx[st[i].c], sv_sy[st[i].c] };
+        poly_fill(p, 3, st[i].ci);
+    }
+}

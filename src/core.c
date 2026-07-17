@@ -2,6 +2,7 @@
 #include "core.h"
 #include "g3d.h"
 #include "shape.h"
+#include "title.h"
 #include <math.h>
 
 // Scratch art for pipeline work lives outside the tree (see .gitignore) and is
@@ -170,8 +171,7 @@ void sim_tick(const Input in[2]) {
 void sim_draw(void) {
     fb_clear(0);
 
-    // 3D behind, 2D in front — the smallest proof of "render in 3D, play in 2D".
-    g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
+    title_draw(g_frame, 12 << 16);
 
     int16_t ground[8] = { 0, 316, VW, 316, VW, VH, 0, VH };   // virtual; g3d scales it
     poly_fill(ground, 4, 1);
