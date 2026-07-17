@@ -151,8 +151,8 @@ int main(int argc, char **argv) {
         for (int f = 0; f < n; f++) sim_tick(in);
         sim_draw();
         const char *ramp = " .:-=+*#%@";
-        for (int y = 0; y < FBH; y += 4) {
-            for (int x = 0; x < FBW; x += 2) {
+        for (int y = 0; y < FBH; y += 8) {
+            for (int x = 0; x < FBW; x += 4) {
                 uint8_t c = g_fb[y * FBW + x];
                 putchar(c == 0 ? ' ' : (c >= 8 && c < 16) ? ramp[(c - 8) + 1] : '0' + (c % 8));
             }
@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     class_addMethod(vc, SEL_("drawRect:"), (IMP)fbview_draw, "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
     objc_registerClassPair(vc);
 
-    CGRect r = { { 0, 0 }, { FBW * 3, FBH * 3 } };
+    CGRect r = { { 0, 0 }, { FBW * 2, FBH * 2 } };
     id win = MSG(id)(CLS_("NSWindow"), SEL_("alloc"));
     win = MSG(id, CGRect, unsigned long, unsigned long, BOOL)(win,
         SEL_("initWithContentRect:styleMask:backing:defer:"), r, 1 | 2 | 4, 2, NO);

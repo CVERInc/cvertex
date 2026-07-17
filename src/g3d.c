@@ -3,7 +3,7 @@
 #include "core.h"
 #include "mesh_torus.h"
 
-#define PROJ  180              // focal length (pixels)
+#define PROJ  360              // focal length (pixels)
 #define NEAR  (1 << 14)        // near plane
 
 static inline int32_t mul15(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 15); }

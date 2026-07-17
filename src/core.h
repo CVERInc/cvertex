@@ -3,8 +3,11 @@
 #define CORE_H
 #include <stdint.h>
 
-#define FBW 320
-#define FBH 180
+// 640x360, not 320x180. The framebuffer lives in __bss — zerofill — so its size costs
+// exactly nothing on disk, and the art is vector, so there is no upper resolution to
+// respect. Retro instinct says 320x180; the budget says it never had to.
+#define FBW 640
+#define FBH 360
 #define MAXPTS 256   // max intersections on one scanline. A traced outline crosses many times — don't size this by hand-drawn-polygon intuition.
 
 // Palette-indexed framebuffer: one byte per pixel.

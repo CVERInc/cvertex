@@ -93,8 +93,8 @@ uint64_t g_checksum;   // determinism self-check
 
 void sim_init(void) {
     tables_init();
-    g_act[0] = (Actor){ 80 << FP, 100 << FP, 0, 0, 256, 0 };   // 256 = facing right
-    g_act[1] = (Actor){ 240 << FP, 100 << FP, 0, 0, 768, 0 };  // 768 = facing left
+    g_act[0] = (Actor){ 160 << FP, 200 << FP, 0, 0, 768, 0 };
+    g_act[1] = (Actor){ 480 << FP, 200 << FP, 0, 0, 256, 0 };
     g_checksum = 0;
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
     g_pal[0] = 0xFF1A1C2C;  // background
@@ -118,10 +118,10 @@ void sim_init(void) {
 uint32_t g_frame;
 int g_demo_spin;   // dev: spin the characters to inspect the turnaround
 
-#define GROUND (150 << FP)
+#define GROUND (300 << FP)
 #define CAMZ    (5 << 16)      // camera distance. The sim never sees this.
-#define CH_SIZE (105 << 10)    // character height, world units (~1.6)
-#define CH_PX   (((int64_t)CH_SIZE * 180) / CAMZ)   // ...and in pixels, derived not guessed
+#define CH_SIZE (210 << 10)    // character height, world units (~1.6)
+#define CH_PX   (((int64_t)CH_SIZE * 360) / CAMZ)   // ...and in pixels, derived not guessed
 #define FOOT     8             // actor origin sits this far above the soles
 
 uint8_t g_events;
@@ -148,7 +148,9 @@ void sim_tick(const Input in[2]) {
         // Turning is state, not decoration: reverse direction and she rotates through
         // the drawn views to get there instead of flipping in a single frame.
         if (in[i].x) {
-            int want = in[i].x > 0 ? 256 : 768;
+            // Which drawn angle looks screen-right is a property of the ART, not of the
+            // maths: this sheet's 90 degree view faces LEFT. Read the sheet, don't assume.
+            int want = in[i].x > 0 ? 768 : 256;
             int diff = ((want - a->facing + 512) & 1023) - 512;   // shortest way round
             int step = diff > 40 ? 40 : (diff < -40 ? -40 : diff);
             a->facing = (int16_t)((a->facing + step) & 1023);
@@ -163,7 +165,7 @@ void sim_draw(void) {
     // 3D behind, 2D in front — the smallest proof of "render in 3D, play in 2D".
     g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
 
-    int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
+    int16_t ground[8] = { 0, 316, FBW, 316, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);
 
     // The two characters.
@@ -173,7 +175,7 @@ void sim_draw(void) {
         // Gameplay is 2D, so the sim only ever thinks in screen pixels. The conversion
         // happens here and nowhere else — the one place that opinion meets the camera.
         int32_t wpp = world_per_px(CAMZ);
-        int cyc = cy + FOOT - (int)(CH_PX / 2);          // soles on the actor, not the middle
+        int cyc = cy + FOOT * 2 - (int)(CH_PX / 2);          // soles on the actor, not the middle
         int32_t wx =  (cx - FBW / 2) * wpp;
         int32_t wy = -(cyc - FBH / 2) * wpp;
         int flip, residual;
