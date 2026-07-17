@@ -3,15 +3,29 @@
 #define CORE_H
 #include <stdint.h>
 
-// 640x360, not 320x180. The framebuffer lives in __bss — zerofill — so its size costs
-// exactly nothing on disk, and the art is vector, so there is no upper resolution to
-// respect. Retro instinct says 320x180; the budget says it never had to.
-#define FBW 640
-#define FBH 360
+// The framebuffer is sized at RUNTIME. It lives in __bss — zerofill — so reserving the
+// largest sane buffer costs exactly nothing on disk, and the art is vector, so there is
+// no resolution it stops being correct at.
+//
+// That makes chunky-pixels vs sharp-vectors a number, not an architecture: run at 640x360
+// and scale up and you get a deliberate 1994 pixel grid; run at the display's own
+// resolution and the same polygons come out sharp. Same art, same binary, one integer.
+// 🔴 The simulation lives here, in virtual pixels, and this NEVER changes with the
+// framebuffer. If gameplay were measured in real pixels, the same inputs would produce
+// different physics at a different resolution — and a replay recorded at 640x360 would
+// desync at 1920x1080, taking lockstep co-op down with it. Determinism has to survive
+// the display, so the display is not allowed to be part of it.
+#define VW 640
+#define VH 360
+
+#define MAXFBW 3840
+#define MAXFBH 2160
+extern int g_fbw, g_fbh;
+void fb_resize(int w, int h);
 #define MAXPTS 256   // max intersections on one scanline. A traced outline crosses many times — don't size this by hand-drawn-polygon intuition.
 
 // Palette-indexed framebuffer: one byte per pixel.
-extern uint8_t  g_fb[FBW * FBH];
+extern uint8_t  g_fb[MAXFBW * MAXFBH];
 extern uint32_t g_pal[256];   // 0xAARRGGBB
 
 // Sine lookup table. The synth uses it for waveforms, 3D uses it for rotation — one

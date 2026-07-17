@@ -20,11 +20,18 @@ void tables_init(void) {
         g_sin[i] = (int16_t)(sinf((float)i * 6.2831853f / 1024.f) * 32767.f);
 }
 
-uint8_t  g_fb[FBW * FBH];
+uint8_t  g_fb[MAXFBW * MAXFBH];
+int g_fbw, g_fbh;
+
+void fb_resize(int w, int h) {
+    if (w > MAXFBW) w = MAXFBW;
+    if (h > MAXFBH) h = MAXFBH;
+    g_fbw = w; g_fbh = h;
+}
 uint32_t g_pal[256];
 
 void fb_clear(uint8_t ci) {
-    for (int i = 0; i < FBW * FBH; i++) g_fb[i] = ci;
+    for (int i = 0; i < g_fbw * g_fbh; i++) g_fb[i] = ci;
 }
 
 // Scanline fill: for each scanline, find every edge intersection, sort, fill pairs.
@@ -41,7 +48,7 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
         if (y > maxy) maxy = y;
     }
     if (miny < 0) miny = 0;
-    if (maxy > FBH - 1) maxy = FBH - 1;
+    if (maxy > g_fbh - 1) maxy = g_fbh - 1;
 
     int xs[MAXPTS];
     for (int y = miny; y <= maxy; y++) {
@@ -70,10 +77,10 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci) {
         }
         for (int a = 0; a + 1 < cnt; a += 2) {
             int L = xs[a], R = xs[a + 1];
-            if (R < 0 || L > FBW - 1) continue;
+            if (R < 0 || L > g_fbw - 1) continue;
             if (L < 0) L = 0;
-            if (R > FBW - 1) R = FBW - 1;
-            uint8_t *row = &g_fb[y * FBW];
+            if (R > g_fbw - 1) R = g_fbw - 1;
+            uint8_t *row = &g_fb[y * g_fbw];
             for (int x = L; x <= R; x++) row[x] = ci;
         }
     }
@@ -118,10 +125,11 @@ void sim_init(void) {
 uint32_t g_frame;
 int g_demo_spin;   // dev: spin the characters to inspect the turnaround
 
-#define GROUND (300 << FP)
+#define GROUND (300 << FP)   // virtual pixels
 #define CAMZ    (5 << 16)      // camera distance. The sim never sees this.
+#define PROJ_V  VH             // focal length in virtual pixels
 #define CH_SIZE (210 << 10)    // character height, world units (~1.6)
-#define CH_PX   (((int64_t)CH_SIZE * 360) / CAMZ)   // ...and in pixels, derived not guessed
+#define CH_PX   (((int64_t)CH_SIZE * PROJ_V) / CAMZ)   // ...and in virtual pixels, derived not guessed
 #define FOOT     8             // actor origin sits this far above the soles
 
 uint8_t g_events;
@@ -143,8 +151,8 @@ void sim_tick(const Input in[2]) {
             if (!a->grounded) g_events |= (EV_LAND_A << i);
             a->y = GROUND; a->vy = 0; a->grounded = 1;
         }
-        if (a->x < (8 << FP))         a->x = 8 << FP;
-        if (a->x > ((FBW - 8) << FP)) a->x = (FBW - 8) << FP;
+        if (a->x < (8 << FP))       a->x = 8 << FP;
+        if (a->x > ((VW - 8) << FP)) a->x = (VW - 8) << FP;
         // Turning is state, not decoration: reverse direction and she rotates through
         // the drawn views to get there instead of flipping in a single frame.
         if (in[i].x) {
@@ -165,7 +173,7 @@ void sim_draw(void) {
     // 3D behind, 2D in front — the smallest proof of "render in 3D, play in 2D".
     g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
 
-    int16_t ground[8] = { 0, 316, FBW, 316, FBW, FBH, 0, FBH };
+    int16_t ground[8] = { 0, 316, VW, 316, VW, VH, 0, VH };   // virtual; g3d scales it
     poly_fill(ground, 4, 1);
 
     // The two characters.
@@ -176,8 +184,8 @@ void sim_draw(void) {
         // happens here and nowhere else — the one place that opinion meets the camera.
         int32_t wpp = world_per_px(CAMZ);
         int cyc = cy + FOOT * 2 - (int)(CH_PX / 2);          // soles on the actor, not the middle
-        int32_t wx =  (cx - FBW / 2) * wpp;
-        int32_t wy = -(cyc - FBH / 2) * wpp;
+        int32_t wx =  (cx - VW / 2) * wpp;
+        int32_t wy = -(cyc - VH / 2) * wpp;
         int flip, residual;
         int fc = g_demo_spin ? (int)((g_frame * 4) & 1023) : g_act[i].facing;
         const Shape *v = turn_pick(&g_hero, fc, &flip, &residual);
@@ -185,8 +193,8 @@ void sim_draw(void) {
 #else
         // No art present (a clean checkout): a placeholder body, so the engine still runs.
         int16_t body[12] = {
-            cx,     cy - 12,  cx + 7, cy - 4,  cx + 5, cy + 8,
-            cx,     cy + 4,   cx - 5, cy + 8,  cx - 7, cy - 4,
+            cx,     cy - 24,  cx + 14, cy - 8,  cx + 10, cy + 16,
+            cx,     cy + 8,   cx - 10, cy + 16, cx - 14, cy - 8,
         };
         poly_fill(body, 6, 2 + i);
 #endif

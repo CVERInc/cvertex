@@ -3,7 +3,9 @@
 #include "core.h"
 #include "mesh_torus.h"
 
-#define PROJ  360              // focal length (pixels)
+// Focal length tracks the framebuffer, so the field of view is the same picture at
+// any resolution — only the sampling gets finer.
+#define PROJ  (g_fbh)
 #define NEAR  (1 << 14)        // near plane
 
 static inline int32_t mul15(int32_t a, int32_t b) { return (int32_t)(((int64_t)a * b) >> 15); }
@@ -26,8 +28,8 @@ void g3d_rot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
 // One projection formula, used by meshes and shapes alike. Two copies would drift.
 void g3d_project(int32_t x, int32_t y, int32_t z, int16_t *sx, int16_t *sy) {
     int32_t zz = z < NEAR ? NEAR : z;                   // clamped z, safe to divide by
-    *sx = (int16_t)(FBW / 2 + (int32_t)(((int64_t)x * PROJ) / zz));
-    *sy = (int16_t)(FBH / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
+    *sx = (int16_t)(g_fbw / 2 + (int32_t)(((int64_t)x * PROJ) / zz));
+    *sy = (int16_t)(g_fbh / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
 }
 
 #define MAXV 2048

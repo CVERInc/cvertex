@@ -45,7 +45,9 @@ static void project_pts(const int16_t *src, int n, int ax, int ay, int az,
     }
 }
 
-int32_t world_per_px(int32_t wz) { return (int32_t)(((int64_t)wz << 16) / (360 << 16)); }
+// Virtual pixels -> world units. VH, not g_fbh: the sim's opinion must not move when
+// the display does.
+int32_t world_per_px(int32_t wz) { return (int32_t)(((int64_t)wz << 16) / (VH << 16)); }
 
 void shape_draw3d(const Shape *s, int32_t wx, int32_t wy, int32_t wz,
                   int ax, int ay, int az, int32_t size, int32_t depth, int flip) {

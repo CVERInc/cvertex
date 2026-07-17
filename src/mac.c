@@ -18,7 +18,7 @@
 #define CLS_(s) ((id)objc_getClass(s))
 #define MSG(ret, ...) ((ret (*)(id, SEL, ##__VA_ARGS__))objc_msgSend)
 
-static uint32_t g_rgba[FBW * FBH];
+static uint32_t g_rgba[MAXFBW * MAXFBH];
 static uint8_t  g_keys[128];
 static int      g_running;   // see synth.c's 16KB lesson: assign the initial value at runtime, never give it a non-zero initializer
 extern uint64_t g_checksum;
@@ -26,7 +26,7 @@ extern uint64_t g_checksum;
 // framebuffer (palette indices) → RGBA, then blit into the window. That's the whole of "display."
 static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     (void)self; (void)_cmd; (void)dirty;
-    for (int i = 0; i < FBW * FBH; i++) g_rgba[i] = g_pal[g_fb[i]];
+    for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
 
     id nsctx = MSG(id)(CLS_("NSGraphicsContext"), SEL_("currentContext"));
     if (!nsctx) return;
@@ -34,8 +34,8 @@ static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     if (!ctx) return;
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGDataProviderRef dp = CGDataProviderCreateWithData(0, g_rgba, sizeof(g_rgba), 0);
-    CGImageRef img = CGImageCreate(FBW, FBH, 8, 32, FBW * 4, cs,
+    CGDataProviderRef dp = CGDataProviderCreateWithData(0, g_rgba, (size_t)g_fbw * g_fbh * 4, 0);
+    CGImageRef img = CGImageCreate(g_fbw, g_fbh, 8, 32, g_fbw * 4, cs,
         kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little, dp, 0, 0, kCGRenderingIntentDefault);
 
     CGContextSetInterpolationQuality(ctx, kCGInterpolationNone);  // pixels need to stay sharp
@@ -110,11 +110,23 @@ static void read_input(Input in[2]) {
 
 int main(int argc, char **argv) {
     g_running = 1;
+
+    // Resolution is an argument, because it is a look, not an architecture. 640x360
+    // scaled up is a 1994 pixel grid; the display's own resolution is the same polygons,
+    // sharp. Same art, same binary.
+    int rw = 640, rh = 360, fullscreen = 0;
+    const char *runmode = 0; int modearg = 0;
+    for (int a = 1; a < argc; a++) {
+        if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
+        else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
+        else if (argv[a][0] == 0x2D && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
+    }
+    fb_resize(rw, rh);
     sim_init();
 
     // --headless N: no window, run N frames, print the checksum. Used to verify determinism.
-    if (argc > 2 && !strcmp(argv[1], "--headless")) {
-        int n = atoi(argv[2]);
+    if (runmode && !strcmp(runmode, "--headless")) {
+        int n = modearg;
         for (int f = 0; f < n; f++) {
             Input in[2] = { { (f / 17) % 3 - 1, 0, (f % 23) == 0 },
                             { (f / 11) % 3 - 1, 0, (f % 31) == 0 } };
@@ -122,7 +134,7 @@ int main(int argc, char **argv) {
         }
         sim_draw();
         uint64_t ink = 0;
-        for (int i = 0; i < FBW * FBH; i++) ink = ink * 3 + g_fb[i];
+        for (int i = 0; i < g_fbw * g_fbh; i++) ink = ink * 3 + g_fb[i];
         printf("frames=%d sim_checksum=%llu fb_checksum=%llu\n", n, g_checksum, ink);
         return 0;
     }
@@ -130,14 +142,13 @@ int main(int argc, char **argv) {
     // --ppm N: run N frames, dump the framebuffer to stdout as a PPM. The ASCII dump
     // proves the geometry is right; this one proves it looks good — two different
     // things. A developer's eyes only, doesn't ship in a release build.
-    if (argc > 2 && !strcmp(argv[1], "--ppm")) {
-        extern int g_demo_spin; if (argc > 3) g_demo_spin = 1;
-        int n = atoi(argv[2]);
+    if (runmode && !strcmp(runmode, "--ppm")) {
+        int n = modearg;
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
         for (int f = 0; f < n; f++) sim_tick(in);
         sim_draw();
-        printf("P6\n%d %d\n255\n", FBW, FBH);
-        for (int i = 0; i < FBW * FBH; i++) {
+        printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
+        for (int i = 0; i < g_fbw * g_fbh; i++) {
             uint32_t c = g_pal[g_fb[i]];
             putchar((c >> 16) & 255); putchar((c >> 8) & 255); putchar(c & 255);
         }
@@ -145,15 +156,15 @@ int main(int argc, char **argv) {
     }
 
     // --dump N: run N frames, print the framebuffer as ASCII. A developer's eyes only, doesn't ship in a release build.
-    if (argc > 2 && !strcmp(argv[1], "--dump")) {
-        int n = atoi(argv[2]);
+    if (runmode && !strcmp(runmode, "--dump")) {
+        int n = modearg;
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
         for (int f = 0; f < n; f++) sim_tick(in);
         sim_draw();
         const char *ramp = " .:-=+*#%@";
-        for (int y = 0; y < FBH; y += 8) {
-            for (int x = 0; x < FBW; x += 4) {
-                uint8_t c = g_fb[y * FBW + x];
+        for (int y = 0; y < g_fbh; y += 8) {
+            for (int x = 0; x < g_fbw; x += 4) {
+                uint8_t c = g_fb[y * g_fbw + x];
                 putchar(c == 0 ? ' ' : (c >= 8 && c < 16) ? ramp[(c - 8) + 1] : '0' + (c % 8));
             }
             putchar('\n');
@@ -168,7 +179,7 @@ int main(int argc, char **argv) {
     class_addMethod(vc, SEL_("drawRect:"), (IMP)fbview_draw, "v@:{CGRect={CGPoint=dd}{CGSize=dd}}");
     objc_registerClassPair(vc);
 
-    CGRect r = { { 0, 0 }, { FBW * 2, FBH * 2 } };
+    CGRect r = { { 0, 0 }, { g_fbw * 2, g_fbh * 2 } };
     id win = MSG(id)(CLS_("NSWindow"), SEL_("alloc"));
     win = MSG(id, CGRect, unsigned long, unsigned long, BOOL)(win,
         SEL_("initWithContentRect:styleMask:backing:defer:"), r, 1 | 2 | 4, 2, NO);
@@ -178,6 +189,11 @@ int main(int argc, char **argv) {
     id view = MSG(id)((id)vc, SEL_("alloc"));
     view = MSG(id, CGRect)(view, SEL_("initWithFrame:"), r);
     MSG(void, id)(win, SEL_("setContentView:"), view);
+    if (fullscreen) {
+        // NSWindowCollectionBehaviorFullScreenPrimary, then ask for the toggle.
+        MSG(void, unsigned long)(win, SEL_("setCollectionBehavior:"), 1UL << 7);
+        MSG(void, id)(win, SEL_("toggleFullScreen:"), 0);
+    }
     MSG(void, id)(win, SEL_("makeKeyAndOrderFront:"), 0);
     MSG(void, BOOL)(app, SEL_("activateIgnoringOtherApps:"), YES);
     MSG(void)(app, SEL_("finishLaunching"));
