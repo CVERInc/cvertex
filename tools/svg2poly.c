@@ -22,6 +22,13 @@
 //              ^name ^base   ^degrees:file, ascending, 0..359
 //   Pass --mirror to cover only 0..180 and let the engine reflect the far half. That is
 //   ONLY correct for a symmetric design; anything asymmetric must draw the full turn.
+//
+// 🔴 --key RRGGBB drops a background colour, and the source art MUST use one.
+// Tracing art on a transparent background silently composites it onto WHITE, so white
+// artwork merges with the background, becomes one region, and the tracer discards it as
+// background. A white-haired character then arrives with a hole where her hair was —
+// and on a white page it still LOOKS right, because you're seeing the page through her.
+// Key on a colour the art can't contain (magenta) and drop it here.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -72,6 +79,15 @@ static void bez(double x0,double y0,double x1,double y1,double x2,double y2,doub
 
 // Nearest existing entry within DE_MERGE, else a new one. The entry keeps a running
 // mean in Lab so a cluster settles on its centre rather than on whichever view came first.
+static int keydrops;
+// The tracer's clustering nudges the key colour a little, so match by distance, not equality.
+static int dropped_key(unsigned rgb, unsigned key) {
+    int dr = (int)((rgb>>16)&255) - (int)((key>>16)&255);
+    int dg = (int)((rgb>>8)&255)  - (int)((key>>8)&255);
+    int db = (int)(rgb&255)       - (int)(key&255);
+    return dr*dr + dg*dg + db*db < 60*60;
+}
+
 static int palidx(unsigned rgb) {
     double L[3]; to_lab(rgb, L);
     int best = -1; double bd = 1e30;
@@ -168,7 +184,11 @@ int main(int argc, char **argv) {
     const char *name = argv[1];
     int base = atoi(argv[2]);
     int mirror = 0, argstart = 3;
-    for (int a = 3; a < argc; a++) if (!strcmp(argv[a], "--mirror")) { mirror = 1; argstart = a + 1; }
+    long key = -1;
+    for (int a = 3; a < argc; a++) {
+        if (!strcmp(argv[a], "--mirror")) { mirror = 1; if (a + 1 > argstart) argstart = a + 1; }
+        else if (!strcmp(argv[a], "--key") && a + 1 < argc) { key = strtol(argv[a+1], NULL, 16); if (a + 2 > argstart) argstart = a + 2; }
+    }
 
     static char buf[1 << 22], d[1 << 20], fill[64], tag[1 << 20];
     static int deg[16];
@@ -201,6 +221,7 @@ int main(int argc, char **argv) {
                 }
             }
             if (!strcmp(fill, "none")) continue;
+            if (key >= 0 && dropped_key(rgb, (unsigned)key)) { keydrops++; continue; }
             int c0 = nc;
             parse_d(d);
             if (nc == c0) continue;
@@ -251,5 +272,9 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "svg2poly: %d views%s -> %d points / %d fills / %d shared colours -> %d bytes\n",
             nvw, mirror ? " (+mirrored half)" : " (full turn)", np, nf, npal, np * 4 + nc * 2 + nf * 6 + npal * 4);
+    if (key >= 0) fprintf(stderr, "svg2poly: dropped %d key-coloured fills\n", keydrops);
+    else fprintf(stderr, "svg2poly: NOTE no --key given. If the art was traced on a transparent or\n"
+                         "          white background, white artwork may be missing and you won't see it\n"
+                         "          on a light page.\n");
     return 0;
 }
