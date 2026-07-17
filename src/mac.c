@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
             a++;
         }
         else if (!strcmp(argv[a], "--help") || !strcmp(argv[a], "-h")) {
-            printf("cvertex — a polygon engine that fits on a floppy\n\n");
+            printf("cvertex — a game engine that draws worlds out of shapes\n\n");
             printf("  --game <name>     which game to run (default: %s)\n", game_vikings.name);
             printf("                    available:");
             for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);

@@ -1,8 +1,9 @@
 # cvertex
 
-> **Fits an entire 3D engine on a floppy disk.** cvertex (C + vertex) draws worlds
-> out of shapes instead of bitmaps, so a game, its music, and the engine itself
-> land in 1,474,560 bytes — with room to spare.
+> **Draws a world out of shapes instead of bitmaps.** cvertex (C + vertex) is a game
+> engine you can read in an afternoon: a software rasterizer, a fixed-point 3D pipeline,
+> an FM synth and a deterministic simulation, in eleven kilobytes of machine code and no
+> dependencies at all.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Language: C](https://img.shields.io/badge/Language-C11-orange.svg)
@@ -12,34 +13,16 @@
 
 ## What & why
 
-A 3.5" HD floppy holds 1,474,560 bytes. That number is the whole design brief.
+There is no engine runtime here, no textures, no sampled audio, no asset loader and no
+parser. What's left is geometry, a palette, and arithmetic — which turns out to be enough
+for a shaded, rotating 3D world with a soundtrack.
 
-It rules out the usual answers before you write a line: no engine runtime, no
-textures, no sampled audio, no asset loader, no parser. What survives is
-geometry, a palette, and arithmetic — which turns out to be enough for a
-shaded, rotating 3D world with a soundtrack.
+Every technique in it is 1994's: palette indices, scanline fills, fixed point, a
+painter's algorithm. Not one bit is new. That was never what stopped 1994 — a SNES needed
+an extra chip in the cartridge to draw wireframes at all, and Star Fox ran at fifteen
+frames a second because of the silicon, not because anybody was short of ideas.
 
-The constraint isn't nostalgia. Storage was never what stopped 1994 from
-shipping full 3D — silicon was. A SNES needed an extra chip in the cartridge to
-draw wireframes at all. The floppy still fits; the hardware caught up. cvertex
-is what you get when you take the old budget and the new machine.
-
-Current cost, macOS:
-
-| | binary | machine code |
-|---|---|---|
-| Empty Cocoa shell (control) | 33,592 | 0 |
-| The whole engine | 53,016 | **7,744** |
-| + a character drawn from seven angles | 102,904 | 9,364 |
-| Share of one floppy | **6.97%** | |
-
-7,744 bytes of machine code is the rasterizer, the deterministic sim, the macOS
-platform layer, an FM synth with a tracker, the fixed-point 3D pipeline, and the
-vector-art pipeline. Most of the binary is Mach-O container overhead, not engine;
-most of the rest is artwork.
-
-Resolution is a runtime number, and the framebuffer is `__bss` — zerofill — so it
-costs nothing on disk. Measured on one core, no GPU:
+The silicon caught up. So the same arithmetic, on one core with no GPU:
 
 | | |
 |---|---|
@@ -48,9 +31,27 @@ costs nothing on disk. Measured on one core, no GPU:
 | 1920x1080 | 2,138 fps |
 | **3840x2160** | **540 fps** |
 
-Which is the argument in one table. Nothing in here is new: palette indices, scanline
-fills, fixed point, painter's algorithm. A 486 could not fill 8.3M pixels. This machine
-does it 540 times a second, with nine frames of headroom left over.
+A 486 could not fill 8.3M pixels. This does it 540 times a second with nine frames of
+headroom left over — running code its authors would have recognised on sight.
+
+What that buys, beyond the number: an engine small enough to hold in your head. You can
+read all of it, so you can trust all of it, and you can change any of it without
+wondering what else knows about it. It's not a big claim — here is all of it:
+
+| | machine code | |
+|---|---|---|
+| `src/core.c` | 1,248 | framebuffer, palette, scanline fill |
+| `src/g3d.c` | 2,868 | the fixed-point 3D pipeline |
+| `src/shape.c` | 1,808 | vector art: extrusion, turnarounds |
+| `src/synth.c` | 1,424 | FM synth, oscillators, tracker |
+| `src/mac.c` | 3,400 | the macOS platform layer |
+| **the engine** | **10,748** | |
+| `games/vikings.c` | 1,004 | two characters, gravity, a floor |
+| `games/title.c` | 2,336 | 27 cubies that spell a letter |
+
+A linked binary is bigger than the sum of its parts is small: about 33 KB of it is Mach-O
+container overhead before a line of ours, and baked artwork is bigger than all the code.
+Neither is the engine.
 
 ## Features
 
@@ -73,8 +74,8 @@ does it 540 times a second, with nine frames of headroom left over.
 ./build.sh && ./cvertex
 ```
 
-A/D/W drives one character, arrow keys drive the other, Esc quits. Every build prints
-its size against the floppy budget.
+A/D/W drives one character, arrow keys drive the other, Esc quits. Every build prints its
+size — the number is worth watching, and watching it is free.
 
 ```sh
 ./cvertex --res 1920 1080   # any resolution; the art is vector
@@ -102,13 +103,13 @@ what number 2 *means* without touching a single pixel:
 | Dusk lighting | Bias the whole table orange | 0 |
 | Shade a 3D face | Give each material 8 consecutive entries — one hue, eight brightnesses — and pick one by the surface normal | 0 |
 
-Light and effects aren't computed, they're a 1 KB table you edit. That is why
-the 3D pipeline is 1,316 bytes: it doesn't calculate light, it looks it up.
+Light and effects aren't computed, they're a 1 KB table you edit. That is why the 3D
+pipeline is 1,316 bytes: it doesn't calculate light, it looks it up.
 
-It also explains the art the engine wants — flat fills, hard edges, no
-gradients. A gradient puts hundreds of near-identical skin tones on one face;
-256 slots can't hold them and wouldn't gain anything if they could. Here the
-constraint and the implementation are the same decision.
+It also decides the art the engine wants — flat fills, hard edges, no gradients. A
+gradient puts hundreds of near-identical skin tones on one face; 256 slots can't hold
+them and wouldn't gain anything if they could. The look and the implementation are the
+same decision, which is why the look is coherent rather than applied.
 
 ### 3D is a software Cx4
 
@@ -153,7 +154,7 @@ does the same for vector art. No loader, no file format, no I/O, no error handli
 `const` data lives in a `__TEXT` page that was already there.
 
 The engine never learns what SVG is. SVG is an authoring format: the full spec is a
-monster and implementing it would eat the whole floppy. Curves flatten and colours
+monster, and an engine that grew one would stop being readable. Curves flatten and colours
 cluster at build time; the engine receives points and a palette index.
 
 Vertex normals in an `.obj` are ignored — flat shading wants face normals, so they come
@@ -190,7 +191,7 @@ Three things about this are load-bearing, and each was a bug first:
 
 ## Size discipline
 
-Two rules earn their place in the budget.
+Small isn't an accident, and it isn't free. Two rules keep it.
 
 **Static variables are zero-initialized; assign at runtime.** A non-zero
 initializer creates `__data`, and macOS aligns segments to 16 KB — so four bytes

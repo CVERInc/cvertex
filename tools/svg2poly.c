@@ -2,7 +2,7 @@
 //
 // 🔴 The engine never learns what SVG is. SVG is an authoring format, not a runtime
 // one — the full spec is a monster (bezier curves / stroke / transform / clip-path /
-// CSS), and implementing it would eat the whole floppy. So it's chewed up here
+// CSS), and an engine that grew one would stop being readable. So it's chewed up here
 // instead: beziers get flattened here, colours get clustered here, and the engine
 // only ever receives "a string of points + a palette index."
 //

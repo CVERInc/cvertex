@@ -10,9 +10,9 @@ clang -std=c11 -Os -fno-stack-protector -fomit-frame-pointer \
 strip -x "$OUT"
 
 # Size is a first-class citizen: every build prints the tally.
+
+# Size is a first-class result, so every build reports it. Machine code is the honest
+# number — the rest of the binary is container overhead and baked artwork.
 BYTES=$(stat -f%z "$OUT")
-BUDGET=1474560
-printf '%s: %s bytes  (budget %s, %s%% used, %s bytes left)\n' \
-  "$OUT" "$BYTES" "$BUDGET" \
-  "$(echo "scale=2; $BYTES*100/$BUDGET" | bc)" \
-  "$((BUDGET - BYTES))"
+TEXT=$(size -m "$OUT" 2>/dev/null | awk '/Section __text/{print $3}')
+printf '%s: %s bytes  (%s of it machine code)\n' "$OUT" "$BYTES" "${TEXT:-?}"
