@@ -278,6 +278,9 @@ print("// danceSeq (start screen) = \(CPlan.danceSeq)")
 print("//   A fixed move dance: K moves out, the same K undone, so it ALWAYS lands back on")
 print("//   the exact start-cube (and thus the explosion always yields the exact C).")
 print("//     fwd  = [3, 0, 6, 14, 9, 1]                     // R U F L' B U'  (raw = face*3 + qt-1)")
+print("//   NOTE: that \"R U F L' B U'\" is cubeconjure's own comment and it mis-decodes its")
+print("//   last two moves — raw 9 = D (not B) and raw 1 = U2 (not U'). The move NUMBERS are")
+print("//   the truth and are what everything below uses; see DANCE for the real decode.")
 print("//     undo = fwd.reversed().map { ($0/3)*3 + (2 - $0%3) }   // inverse, reversed")
 print("//   Encoding: raw = face*3 + (quarterTurns-1); face order U R F D L B;")
 print("//   the app calls animate(face: raw/3, quarterTurns: raw%3 + 1).")
@@ -302,6 +305,340 @@ for e in plan {
 }
 print("};")
 
+// MARK: - Dance states
+//
+// The start-screen show applies danceSeq to the start cube. That's a fixed, finite walk:
+// state 0 = the start cube (solved + startScrambleMoves), then one state per dance move.
+// We do NOT reimplement a cube: the 13 facelet strings come out of cubeconjure's REAL
+// CubieCube/Move/FaceletCube. `swift file.swift` only ever runs one file, so we shell out
+// to swiftc against those exact source files and read the strings back.
+
+let cubeconjure = ProcessInfo.processInfo.environment["CUBECONJURE"]
+    ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Developer/cubeconjure").path
+let solverDir = cubeconjure + "/Sources/CubeConjure/Solver"
+
+func die(_ msg: String) -> Never {
+    FileHandle.standardError.write(("dump_cplan: \(msg)\n").data(using: .utf8)!)
+    exit(1)
+}
+
+/// The 13 facelet strings, straight from cubeconjure's own solver library.
+func faceletStates() -> [String] {
+    let tmp = NSTemporaryDirectory() + "/dump_cplan_\(getpid())"
+    try? FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: tmp) }
+
+    // Mirrors Cube3DController.startScramble (Cube3DView.swift) exactly, then walks danceSeq.
+    let driver = """
+    let solved = "UUUUUUUUURRRRRRRRRFFFFFFFFFDDDDDDDDDLLLLLLLLLBBBBBBBBB"
+    var cube = try FaceletCube.toCubie(solved)
+    for raw in \(CPlan.startScrambleMoves) {
+        guard let m = Move(rawValue: raw) else { fatalError("bad scramble move \\(raw)") }
+        cube = cube.applying(m)
+    }
+    print(FaceletCube.toFacelets(cube))
+    for raw in \(CPlan.danceSeq) {
+        guard let m = Move(rawValue: raw) else { fatalError("bad dance move \\(raw)") }
+        cube = cube.applying(m)
+        print(FaceletCube.toFacelets(cube))
+    }
+    """
+    let mainPath = tmp + "/main.swift"   // must be main.swift for top-level code
+    try? driver.write(toFile: mainPath, atomically: true, encoding: .utf8)
+
+    let sources = ["CubieCube.swift", "Moves.swift", "FaceletCube.swift"].map { solverDir + "/" + $0 }
+    for s in sources where !FileManager.default.fileExists(atPath: s) { die("missing \(s)") }
+
+    let bin = tmp + "/states"
+    let build = Process()
+    build.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    build.arguments = ["swiftc", "-O", "-o", bin, mainPath] + sources
+    build.standardOutput = FileHandle.nullDevice
+    try? build.run()
+    build.waitUntilExit()
+    guard build.terminationStatus == 0 else { die("swiftc failed (status \(build.terminationStatus))") }
+
+    let run = Process()
+    run.executableURL = URL(fileURLWithPath: bin)
+    let pipe = Pipe()
+    run.standardOutput = pipe
+    try? run.run()
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    run.waitUntilExit()
+    guard run.terminationStatus == 0 else { die("state driver failed (status \(run.terminationStatus))") }
+
+    let out = String(data: data, encoding: .utf8)!.split(separator: "\n").map(String.init)
+    guard out.count == CPlan.danceSeq.count + 1 else {
+        die("expected \(CPlan.danceSeq.count + 1) states, got \(out.count)")
+    }
+    for s in out where s.count != 54 { die("state is \(s.count) facelets, not 54") }
+    return out
+}
+
+/// Copied VERBATIM from Cube3DController.cell (Cube3DView.swift) — it is private there,
+/// and it is a pure static function. Re-deriving the geometry is exactly the mistake to
+/// avoid, so this is a literal copy, comments and all.
+///
+/// Facelet index → (cubie x,y,z, SCNBox material index). SceneKit box materials:
+/// 0 +Z, 1 +X, 2 −Z, 3 −X, 4 +Y, 5 −Y. Orientation: U=+Y, F=+Z, R=+X.
+/// Derived face by face from reading order (r = row top→bottom, c = col L→R).
+func cell(_ i: Int) -> (x: Int, y: Int, z: Int, mat: Int) {
+    let f = i / 9, r = (i % 9) / 3, c = (i % 9) % 3
+    switch f {
+    case 0: return (c - 1, 1, r - 1, 4)      // U +Y  (top row = back)
+    case 1: return (1, 1 - r, 1 - c, 1)      // R +X  (left col = front +Z)
+    case 2: return (c - 1, 1 - r, 1, 0)      // F +Z
+    case 3: return (c - 1, -1, 1 - r, 5)     // D −Y  (top row = front)
+    case 4: return (-1, 1 - r, c - 1, 3)     // L −X  (left col = back −Z)
+    default: return (1 - c, 1 - r, -1, 2)    // B −Z  (left col = right +X)
+    }
+}
+
+/// Copied VERBATIM from Cube3DController.faceToSlab: face 0..5 (U R F D L B) →
+/// (axis 0=x/1=y/2=z, layer −1/0/+1).
+func faceToSlab(_ face: Int) -> (axis: Int, layer: Int) {
+    switch face {
+    case 0: return (1, 1)    // U +Y
+    case 1: return (0, 1)    // R +X
+    case 2: return (2, 1)    // F +Z
+    case 3: return (1, -1)   // D −Y
+    case 4: return (0, -1)   // L −X
+    default: return (2, -1)  // B −Z
+    }
+}
+
+/// Signed quarter turns about the **+axis**, right-hand rule. This is cubeconjure's own
+/// two-step chain, copied rather than re-derived (see the DANCE_QT comment in the output):
+///   animate():     qt = layer < 0 ? (4 - quarterTurns) : quarterTurns
+///   animateSlab(): signed = qt == 1 ? -1 : (qt == 2 ? -2 : 1)
+func signedQuarterTurns(face: Int, quarterTurns: Int) -> Int {
+    let (_, layer) = faceToSlab(face)
+    let qt = layer < 0 ? (4 - quarterTurns) : quarterTurns
+    return qt == 1 ? -1 : (qt == 2 ? -2 : 1)
+}
+
+// buildCubies(): index = ((x+1)*3 + (y+1))*3 + (z+1).
+func cubieIndex(_ x: Int, _ y: Int, _ z: Int) -> Int { ((x + 1) * 3 + (y + 1)) * 3 + (z + 1) }
+func cubieCoord(_ n: Int) -> (x: Int, y: Int, z: Int) { (n / 9 - 1, (n / 3) % 3 - 1, n % 3 - 1) }
+
+let letters: [Character] = ["U", "R", "F", "D", "L", "B"]
+let states = faceletStates()
+let nStates = states.count
+
+// states[s][cubie][mat] — 0 = black plastic, 1..6 = U R F D L B.
+var cubeStates = [[[Int]]](repeating: [[Int]](repeating: [Int](repeating: 0, count: 6), count: 27),
+                           count: nStates)
+for (s, facelets) in states.enumerated() {
+    let f = Array(facelets)
+    for i in 0..<54 {
+        let p = cell(i)
+        guard let colour = letters.firstIndex(of: f[i]) else { die("bad facelet '\(f[i])'") }
+        cubeStates[s][cubieIndex(p.x, p.y, p.z)][p.mat] = colour + 1
+    }
+}
+
+// MARK: - Checks (hard failures — a silent wrong table is worse than no table)
+
+var checks: [String] = []
+
+// danceSeq is self-inverse: the last state must equal state 0, element for element.
+let selfInverse = cubeStates[nStates - 1] == cubeStates[0]
+checks.append("state[\(nStates - 1)] == state[0]: \(selfInverse ? "YES" : "NO")")
+if !selfInverse { warnings.append("danceSeq is NOT self-inverse: state[\(nStates - 1)] != state[0]") }
+
+let warningsBeforeColourCheck = warnings.count
+for s in 0..<nStates {
+    var counts = [Int](repeating: 0, count: 7)
+    for c in 0..<27 { for m in 0..<6 { counts[cubeStates[s][c][m]] += 1 } }
+    let coloured = counts[1...6].reduce(0, +)
+    if coloured != 54 { warnings.append("state \(s): \(coloured) coloured faces, expected 54") }
+    for k in 1...6 where counts[k] != 9 {
+        warnings.append("state \(s): colour \(letters[k - 1]) appears \(counts[k])×, expected 9")
+    }
+}
+checks.append("every state: 9 of each colour 1..6, 54 non-zero faces: "
+              + (warnings.count == warningsBeforeColourCheck ? "YES (all \(nStates) states)" : "NO"))
+
+let core = cubieIndex(0, 0, 0)
+let coreBlack = cubeStates.allSatisfy { $0[core].allSatisfy { $0 == 0 } }
+checks.append("core cubie (index \(core), x=y=z=0) all 6 faces = 0: \(coreBlack ? "YES" : "NO")")
+if !coreBlack { warnings.append("core cubie \(core) is not fully black") }
+
+// Corners 3 stickers, edges 2, centres 1, core 0 — in every state.
+var kinds = [Int: Int]()
+for c in 0..<27 {
+    let counts = Set((0..<nStates).map { s in cubeStates[s][c].filter { $0 != 0 }.count })
+    guard counts.count == 1, let n = counts.first else {
+        warnings.append("cubie \(c): sticker count varies across states (\(counts.sorted()))")
+        continue
+    }
+    let p = cubieCoord(c)
+    let expect = [p.x, p.y, p.z].filter { $0 != 0 }.count
+    if n != expect { warnings.append("cubie \(c) at \(p): \(n) stickers, geometry says \(expect)") }
+    kinds[n, default: 0] += 1
+}
+checks.append("corners(3 faces)=\(kinds[3] ?? 0) edges(2)=\(kinds[2] ?? 0) "
+              + "centres(1)=\(kinds[1] ?? 0) core(0)=\(kinds[0] ?? 0)  [expect 8/12/6/1]")
+
+// The sign check that matters: DANCE_AXIS/DANCE_QT are only right if physically rotating
+// DANCE_LAYER's 9 cubies by DANCE_QT × 90° about +DANCE_AXIS (RH rule) turns state s into
+// state s+1. The states come from the real solver, so this closes the loop on the signs
+// WITHOUT trusting the derivation. Everything below is generic rotation, not cube logic.
+
+/// Copied VERBATIM from Cube3DController.matNormal (Cube3DView.swift):
+/// outward normal for an SCNBox material index (0 +Z, 1 +X, 2 −Z, 3 −X, 4 +Y, 5 −Y).
+func matNormal(_ mat: Int) -> (Int, Int, Int) {
+    switch mat {
+    case 0: return (0, 0, 1)
+    case 1: return (1, 0, 0)
+    case 2: return (0, 0, -1)
+    case 3: return (-1, 0, 0)
+    case 4: return (0, 1, 0)
+    default: return (0, -1, 0)
+    }
+}
+func matForNormal(_ n: (Int, Int, Int)) -> Int {
+    (0..<6).first { matNormal($0) == n } ?? -1
+}
+
+/// Rotate an integer vector by `qt` × 90° about +axis, right-hand rule.
+func rotate(_ v: (Int, Int, Int), axis: Int, qt: Int) -> (Int, Int, Int) {
+    var (x, y, z) = v
+    for _ in 0..<((qt % 4) + 4) % 4 {          // one +90° RH step at a time
+        switch axis {
+        case 0: (y, z) = (-z, y)               // about +X: y→z
+        case 1: (z, x) = (-x, z)               // about +Y: z→x
+        default: (x, y) = (-y, x)              // about +Z: x→y
+        }
+    }
+    return (x, y, z)
+}
+
+var transitionsOK = 0
+for s in 0..<(nStates - 1) {
+    let raw = CPlan.danceSeq[s]
+    let (axis, layer) = faceToSlab(raw / 3)
+    let qt = signedQuarterTurns(face: raw / 3, quarterTurns: raw % 3 + 1)
+    var next = cubeStates[s]                                   // untouched cubies stay put
+    for c in 0..<27 {
+        let p = cubieCoord(c)
+        guard (axis == 0 ? p.x : axis == 1 ? p.y : p.z) == layer else { continue }
+        let np = rotate((p.x, p.y, p.z), axis: axis, qt: qt)
+        for m in 0..<6 {
+            let nm = matForNormal(rotate(matNormal(m), axis: axis, qt: qt))
+            next[cubieIndex(np.0, np.1, np.2)][nm] = cubeStates[s][c][m]
+        }
+    }
+    if next == cubeStates[s + 1] { transitionsOK += 1 }
+    else { warnings.append("move \(s) (raw \(raw)): axis \(axis) qt \(qt) does NOT map state \(s) → state \(s + 1) — SIGN ERROR") }
+}
+checks.append("DANCE_AXIS/DANCE_QT reproduce every state transition: "
+              + "\(transitionsOK)/\(nStates - 1)")
+
+// MARK: - Emit dance data
+
+print("")
+print("// ---- start-screen dance ----------------------------------------------------")
+print("//")
+print("// Raw move encoding: raw = face*3 + (quarterTurns-1); face order U R F D L B;")
+print("// quarterTurns 1/2/3 = 90° CW / 180° / 90° CCW seen from OUTSIDE that face.")
+print("//   decode: face = raw/3, quarterTurns = raw%3 + 1")
+print("// The 12 dance moves are: "
+      + CPlan.danceSeq.map { raw -> String in
+            let f = raw / 3, qt = raw % 3 + 1
+            return "\(letters[f])" + (qt == 1 ? "" : qt == 2 ? "2" : "'")
+        }.joined(separator: " "))
+print("static const uint8_t DANCE[\(CPlan.danceSeq.count)] = { "
+      + CPlan.danceSeq.map(String.init).joined(separator: ", ") + " };")
+print("")
+print("// The 9 cubie indices in each dance move's turning layer (cubeconjure's own")
+print("// numbering: ((x+1)*3 + (y+1))*3 + (z+1)), ascending.")
+print("static const uint8_t DANCE_LAYER[\(CPlan.danceSeq.count)][9] = {")
+for raw in CPlan.danceSeq {
+    let (axis, layer) = faceToSlab(raw / 3)
+    let layerCubies = (0..<27).filter { n in
+        let p = cubieCoord(n)
+        return (axis == 0 ? p.x : axis == 1 ? p.y : p.z) == layer
+    }
+    if layerCubies.count != 9 { warnings.append("move \(raw): layer has \(layerCubies.count) cubies") }
+    let f = raw / 3, qt = raw % 3 + 1
+    print("  { " + layerCubies.map { String(format: "%2d", $0) }.joined(separator: ", ")
+          + " },   // \(letters[f])\(qt == 1 ? "" : qt == 2 ? "2" : "'")")
+}
+print("};")
+print("")
+print("// Rotation axis of each dance move: 0=x, 1=y, 2=z.")
+print("// From cubeconjure's faceToSlab(): U=+Y/+1  R=+X/+1  F=+Z/+1  D=−Y/−1  L=−X/−1  B=−Z/−1")
+print("// (its orientation is U=+Y, F=+Z, R=+X), so the axis is the face's axis and the")
+print("// layer is its sign.")
+print("static const int8_t DANCE_AXIS[\(CPlan.danceSeq.count)] = { "
+      + CPlan.danceSeq.map { String(faceToSlab($0 / 3).axis) }.joined(separator: ", ") + " };")
+print("")
+print("// Signed quarter turns about the +axis named by DANCE_AXIS, right-hand rule:")
+print("// negative = RH-negative (= CW seen from outside the +axis). ±1 = quarter, −2 = half.")
+print("//")
+print("// HOW THE SIGN IS DERIVED (a sign error here is invisible until it isn't), taken")
+print("// from cubeconjure's own two-step chain rather than re-derived:")
+print("//   1. animate(face:quarterTurns:) turns the standard face notation into a slab turn:")
+print("//        let (axis, layer) = faceToSlab(face)")
+print("//        let qt = layer < 0 ? (4 - quarterTurns) : quarterTurns")
+print("//      D/L/B sit on the −axis and are measured CW from outside the −axis, i.e. the")
+print("//      OPPOSITE sense to animateSlab's one uniform convention — hence the 1↔3 flip.")
+print("//   2. animateSlab(axis:layer:quarterTurns:) rotates ALL slabs about the +axis:")
+print("//        let signed = qt == 1 ? -1 : (qt == 2 ? -2 : 1);  angle = signed * (π/2)")
+print("//      \"CW seen from outside the +axis is a NEGATIVE rotation about it (RH rule).\"")
+print("// So: DANCE_QT = signed, and rotating DANCE_LAYER's 9 cubies by DANCE_QT * 90°")
+print("// about +DANCE_AXIS (RH rule) reproduces exactly what the app draws — and lands on")
+print("// the next CUBE_STATES entry.")
+print("static const int8_t DANCE_QT[\(CPlan.danceSeq.count)] = { "
+      + CPlan.danceSeq.map { String(signedQuarterTurns(face: $0 / 3, quarterTurns: $0 % 3 + 1)) }
+            .joined(separator: ", ") + " };")
+
+// MARK: - Emit states
+
+print("")
+print("// ---- sticker colours per dance state ---------------------------------------")
+print("//")
+print("// \(nStates) states × 27 cubies × 6 faces. 0 = black plastic, 1..6 = U R F D L B.")
+print("// State 0 = the start cube (solved + startScrambleMoves); state s = state 0 with")
+print("// DANCE[0..<s] applied. danceSeq is self-inverse, so state \(nStates - 1) == state 0"
+      + " (asserted: \(selfInverse ? "holds" : "FAILS")).")
+print("//")
+print("// Cubie index: cubeconjure's buildCubies() numbering, ((x+1)*3 + (y+1))*3 + (z+1).")
+print("// Face index: cubeconjure's SCNBox material order — 0 +Z, 1 +X, 2 −Z, 3 −X, 4 +Y, 5 −Y.")
+print("// A face with no sticker (interior) is 0: each cubie carries stickers only on its")
+print("// true outer faces, the rest black plastic.")
+print("//")
+print("// State 0, as the six faces read U R F D L B (top-left → bottom-right):")
+for f in 0..<6 {
+    let rows = (0..<3).map { r in (0..<3).map { c in String(Array(states[0])[f * 9 + r * 3 + c]) }.joined(separator: " ") }
+    print("//   \(letters[f]):  \(rows[0])   |   \(rows[1])   |   \(rows[2])")
+}
+print("static const uint8_t CUBE_STATES[\(nStates)][27][6] = {")
+for s in 0..<nStates {
+    print("  {   // state \(s)" + (s == 0 ? " — the start cube" : " — after \(letters[CPlan.danceSeq[s-1] / 3])"
+          + (CPlan.danceSeq[s-1] % 3 == 0 ? "" : CPlan.danceSeq[s-1] % 3 == 1 ? "2" : "'")))
+    for c in 0..<27 {
+        let p = cubieCoord(c)
+        print("    { " + cubeStates[s][c].map { String($0) }.joined(separator: ", ")
+              + " },  // \(String(format: "%2d", c)) (\(p.x >= 0 ? " " : "")\(p.x),\(p.y >= 0 ? " " : "")\(p.y),\(p.z >= 0 ? " " : "")\(p.z))")
+    }
+    print("  },")
+}
+print("};")
+
+// MARK: - Report
+
+var report = "checks (dump_cplan):\n"
+for c in checks { report += "  \(c)\n" }
+report += "  state 0, six 3×3 grids (U R F D L B):\n"
+for f in 0..<6 {
+    let rows = (0..<3).map { r in (0..<3).map { c in String(Array(states[0])[f * 9 + r * 3 + c]) }.joined(separator: " ") }
+    report += "    \(letters[f]):  \(rows[0])   \(rows[1])   \(rows[2])\n"
+}
+FileHandle.standardError.write(report.data(using: .utf8)!)
+
 if !warnings.isEmpty {
     FileHandle.standardError.write(("RED FLAG:\n" + warnings.joined(separator: "\n") + "\n").data(using: .utf8)!)
+    exit(1)
 }
