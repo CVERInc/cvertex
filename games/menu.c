@@ -117,8 +117,8 @@ static void draw(void) {
              g_list[i]->name, (uint8_t)(i == g_sel ? 2 : 1));
     }
 
-    text(cx - width("ARROWS   SPACE TO START   ESC QUITS", s) / 2, g_fbh - g_fbh / 6, s,
-         "ARROWS   SPACE TO START   ESC QUITS", 1);
+    text(cx - width("ARROWS OR WASD   SPACE TO START   ESC QUITS", s) / 2,
+         g_fbh - g_fbh / 6, s, "ARROWS OR WASD   SPACE TO START   ESC QUITS", 1);
 }
 
 static uint64_t checksum(void) { return (uint64_t)g_sel; }

@@ -90,6 +90,19 @@ static void pump_events(id app, id mode) {
             SEL_("nextEventMatchingMask:untilDate:inMode:dequeue:"), ~0ULL, past, mode, YES);
         if (!ev) break;
         unsigned long t = MSG(unsigned long)(ev, SEL_("type"));
+
+        // 🔴 A modifier is not a key. Shift, control and friends never produce a keyDown —
+        // they produce flagsChanged, and a loop that only reads keyDown simply never hears
+        // them. Right Shift was bound to a player action for a while and could not have
+        // worked once. The device-dependent bits are what separate left from right; the
+        // documented ones don't.
+        if (t == 12) {  // NSEventTypeFlagsChanged
+            unsigned long m = MSG(unsigned long)(ev, SEL_("modifierFlags"));
+            g_keys[60] = (m & 0x0004) ? 1 : 0;   // right shift
+            g_keys[56] = (m & 0x0002) ? 1 : 0;   // left shift
+            continue;
+        }
+
         if (t == 10 || t == 11) {  // NSEventTypeKeyDown / KeyUp
             unsigned short kc = MSG(unsigned short)(ev, SEL_("keyCode"));
             if (kc < 128) g_keys[kc] = (t == 10);
@@ -123,10 +136,10 @@ static void read_input(Input in[2]) {
                      (int8_t)(g_keys[13] - g_keys[1]),       // W - S
                      g_keys[49],                             // space
                      g_keys[14] };                           // E
-    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),    // -> - <-
-                     (int8_t)(g_keys[126] - g_keys[125]),    // up - down
-                     g_keys[36],                             // return
-                     g_keys[60] };                           // right shift
+    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),          // -> - <-
+                     (int8_t)(g_keys[126] - g_keys[125]),          // up - down
+                     g_keys[36],                                   // return
+                     (uint8_t)(g_keys[60] | g_keys[44]) };         // right shift or /
 }
 
 int main(int argc, char **argv) {
