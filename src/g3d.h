@@ -32,7 +32,12 @@ typedef struct {
 // sorted. Draw two meshes one after the other and every triangle of the second lands on
 // top of the first, whatever the depth says. The sort has to see the entire scene, so
 // the scene has to be a list, not a sequence of calls.
-void g3d_scene(const Inst *inst, int ninst, int32_t camz);
+//
+// rx/ry/rz rotate the SCENE — every instance's position orbits and its mesh turns with
+// it. Without this there is no way to say "the whole thing spins": rotating each Inst
+// instead spins 27 objects on the spot, which looks close enough to right while the
+// angle is small and falls apart the moment an instance also has a rotation of its own.
+void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz);
 
 // The transform, exposed so flat vector shapes ride the SAME pipeline as meshes
 // instead of growing a second one. Anything that can produce three coordinates gets
