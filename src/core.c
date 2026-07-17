@@ -118,6 +118,10 @@ void sim_init(void) {
 uint32_t g_frame;
 
 #define GROUND (150 << FP)
+#define CAMZ    (5 << 16)      // camera distance. The sim never sees this.
+#define CH_SIZE (105 << 10)    // character height, world units (~1.6)
+#define CH_PX   (((int64_t)CH_SIZE * 180) / CAMZ)   // ...and in pixels, derived not guessed
+#define FOOT     8             // actor origin sits this far above the soles
 
 uint8_t g_events;
 
@@ -150,24 +154,31 @@ void sim_draw(void) {
     // 3D behind, 2D in front — the smallest proof of "render in 3D, play in 2D".
     g3d_draw(&g_torus, (int)(g_frame * 3 / 2), (int)(g_frame * 2), 0, 5 << 16);
 
-#ifdef HAVE_DEMO_SHAPE
-    shape_draw3d(&g_demo, 0, (g_sin[(g_frame * 3) & 1023] * 155) >> 15, 0, 5 << 16, 3 << 16, 20000);
-#endif
-
     int16_t ground[8] = { 0, 158, FBW, 158, FBW, FBH, 0, FBH };
     poly_fill(ground, 4, 1);
 
-    // Two characters, each one polygon (spike uses a hand-written shape in place of a motifmint asset)
+    // The two characters.
     for (int i = 0; i < 2; i++) {
         int cx = g_act[i].x >> FP, cy = g_act[i].y >> FP;
+#ifdef HAVE_DEMO_SHAPE
+        // Gameplay is 2D, so the sim only ever thinks in screen pixels. The conversion
+        // happens here and nowhere else — the one place that opinion meets the camera.
+        int32_t wpp = world_per_px(CAMZ);
+        int cyc = cy + FOOT - (int)(CH_PX / 2);          // soles on the actor, not the middle
+        int32_t wx =  (cx - FBW / 2) * wpp;
+        int32_t wy = -(cyc - FBH / 2) * wpp;
+        // Lean into the direction of travel: body language for free, out of a rotation
+        // the renderer was doing anyway.
+        int lean = (g_act[i].vx * 40) >> FP;
+        if (lean > 70) lean = 70; else if (lean < -70) lean = -70;
+        shape_draw3d(&g_demo, wx, wy, CAMZ, 0, lean, 0, CH_SIZE, 9000, i == 1);
+#else
+        // No art present (a clean checkout): a placeholder body, so the engine still runs.
         int16_t body[12] = {
-            cx,     cy - 12,
-            cx + 7, cy - 4,
-            cx + 5, cy + 8,
-            cx,     cy + 4,
-            cx - 5, cy + 8,
-            cx - 7, cy - 4,
+            cx,     cy - 12,  cx + 7, cy - 4,  cx + 5, cy + 8,
+            cx,     cy + 4,   cx - 5, cy + 8,  cx - 7, cy - 4,
         };
         poly_fill(body, 6, 2 + i);
+#endif
     }
 }

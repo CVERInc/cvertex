@@ -33,29 +33,42 @@ void shape_draw(const Shape *s, int cx, int cy, int h) {
 
 // Shape space (±16384, y down) → world (16.16, y up) → rotate → project.
 static void project_pts(const int16_t *src, int n, int ax, int ay, int az,
-                        int32_t tz, int32_t size, int32_t z0, int16_t *ox, int16_t *oy) {
+                        int32_t wx, int32_t wy, int32_t wz,
+                        int32_t size, int32_t z0, int flip, int16_t *ox, int16_t *oy) {
     for (int p = 0; p < n; p++) {
         int32_t x =  (int32_t)(((int64_t)src[p * 2]     * size) >> 15);
         int32_t y = -(int32_t)(((int64_t)src[p * 2 + 1] * size) >> 15);  // SVG y goes down, the world's goes up
         int32_t z = z0;
+        if (flip) x = -x;
         g3d_rot(&x, &y, &z, ax, ay, az);
-        g3d_project(x, y, z + tz, &ox[p], &oy[p]);
+        g3d_project(x + wx, y + wy, z + wz, &ox[p], &oy[p]);
     }
 }
 
-void shape_draw3d(const Shape *s, int ax, int ay, int az, int32_t tz, int32_t size, int32_t depth) {
+int32_t world_per_px(int32_t wz) { return (int32_t)(((int64_t)wz << 16) / (180 << 16)); }
+
+void shape_draw3d(const Shape *s, int32_t wx, int32_t wy, int32_t wz,
+                  int ax, int ay, int az, int32_t size, int32_t depth, int flip) {
     static int16_t fx[MAXXFORM], fy[MAXXFORM], bx[MAXXFORM], by[MAXXFORM];
     if (!s->nf) return;
     int32_t zf = -depth / 2, zb = depth / 2;   // front is nearer the camera
 
-    // ---- side walls: one quad per silhouette edge, front rim to back rim.
+    // ---- back face + side walls, both from the silhouette.
     const Fill *sil = &s->f[0];
     int n = 0;
     for (int c = 0; c < sil->nc; c++) n += s->lens[sil->len_off + c];
     if (n <= MAXXFORM) {
         const int16_t *src = &s->pts[sil->pt_off * 2];
-        project_pts(src, n, ax, ay, az, tz, size, zf, fx, fy);
-        project_pts(src, n, ax, ay, az, tz, size, zb, bx, by);
+        project_pts(src, n, ax, ay, az, wx, wy, wz, size, zf, flip, fx, fy);
+        project_pts(src, n, ax, ay, az, wx, wy, wz, size, zb, flip, bx, by);
+
+        // The back of a paper cutout is the cutout: one flat silhouette in the outline
+        // colour. Drawn first, so the walls and the artwork land on top of it.
+        {
+            static int16_t t[MAXXFORM * 2];
+            for (int p = 0; p < n; p++) { t[p * 2] = bx[p]; t[p * 2 + 1] = by[p]; }
+            poly_fill_n(t, &s->lens[sil->len_off], sil->nc, s->pal_base);
+        }
 
         int base = 0;
         for (int c = 0; c < sil->nc; c++) {
@@ -80,7 +93,7 @@ void shape_draw3d(const Shape *s, int ax, int ay, int az, int32_t tz, int32_t si
         int m = 0;
         for (int c = 0; c < f->nc; c++) m += s->lens[f->len_off + c];
         if (m > MAXXFORM) continue;
-        project_pts(&s->pts[f->pt_off * 2], m, ax, ay, az, tz, size, zf, fx, fy);
+        project_pts(&s->pts[f->pt_off * 2], m, ax, ay, az, wx, wy, wz, size, zf, flip, fx, fy);
         static int16_t t[MAXXFORM * 2];
         for (int p = 0; p < m; p++) { t[p * 2] = fx[p]; t[p * 2 + 1] = fy[p]; }
         poly_fill_n(t, &s->lens[f->len_off], f->nc, f->ci);

@@ -35,7 +35,14 @@ void shape_draw(const Shape *s, int cx, int cy, int h); // h = desired height (p
 // The silhouette is f[0]: a tracer emits the backmost fill first, and for line art
 // that fill IS the outline. Art with a drawn outline hands us its own silhouette.
 //
+// wx/wy/wz = world position (16.16); wz is distance from the camera.
 // size = height in world units (16.16), depth = thickness (16.16).
-void shape_draw3d(const Shape *s, int ax, int ay, int az, int32_t tz, int32_t size, int32_t depth);
+// flip = mirror horizontally (a character facing the other way costs no art).
+void shape_draw3d(const Shape *s, int32_t wx, int32_t wy, int32_t wz,
+                  int ax, int ay, int az, int32_t size, int32_t depth, int flip);
+
+// Screen pixels → world units at a given camera distance. The sim thinks in screen
+// space (gameplay is 2D); this is the one place that opinion meets the 3D camera.
+int32_t world_per_px(int32_t wz);
 
 #endif
