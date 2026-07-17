@@ -130,17 +130,25 @@ static void tick(const Input in[2]) {
         // Cycling your own form is a TEST AFFORDANCE and a lie about the design: the whole
         // point is that someone else does this to you. It's here so "does shape decide
         // passage" can be answered before "who decides your shape" exists.
-        if (in[i].y < 0) {          // S / down — up is jump now
+        if (in[i].act) {            // E / right-shift
             uint8_t want = (uint8_t)((a->form + 1) % NFORM);
             if (!hits(a->x, a->y, a->z, want, a->dir)) { a->form = want; g_events |= EV_MORPH; }
             // Refusing to grow inside a wall isn't politeness — it's the only thing keeping
             // a shape change from being a teleport through solid matter.
         }
 
-        int32_t dx = in[i].x * W(3), dz = 0;
-        if (in[i].x > 0) a->dir = D_EAST; else if (in[i].x < 0) a->dir = D_WEST;
+        // Two axes on the ground. Facing follows whichever you pushed hardest, and that's
+        // the whole aiming interface: walking at a slot already lines your thin side up
+        // with it, so a flat character threads it without ever being told to turn.
+        int32_t dx = in[i].x * W(3), dz = in[i].y * W(3);
+        if (in[i].x || in[i].y) {
+            int ax = in[i].x < 0 ? -in[i].x : in[i].x;
+            int az = in[i].y < 0 ? -in[i].y : in[i].y;
+            if (ax >= az) a->dir = in[i].x > 0 ? D_EAST : D_WEST;
+            else          a->dir = in[i].y > 0 ? D_NORTH : D_SOUTH;
+        }
 
-        if (in[i].act && a->grounded) { a->vy = -W(11); a->grounded = 0; g_events |= EV_JUMP; }
+        if (in[i].jump && a->grounded) { a->vy = -W(11); a->grounded = 0; g_events |= EV_JUMP; }
         a->vy += W(1) / 2;
         if (a->vy > W(14)) a->vy = W(14);
 
@@ -229,6 +237,13 @@ static void draw(void) {
     // under the floor, looking at the underside of the world.
     Cam cam = { { 0, S(W(240)), -S(W(620)) }, 60, 0, 0 };
     g3d_scene(inst, n, &cam, 0, 0, 0);
+}
+
+// A probe that answers in world units. The last three checks read screen pixels and
+// couldn't tell "stopped by a wall" from "this box is simply longer" — which is how three
+// unreachable doors in a row each looked briefly like a collision bug.
+void forms3_probe(int32_t *x, int32_t *y, int32_t *z, int *form) {
+    *x = g_act[0].x; *y = g_act[0].y; *z = g_act[0].z; *form = g_act[0].form;
 }
 
 static uint64_t checksum(void) { return g_checksum; }

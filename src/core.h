@@ -36,9 +36,18 @@ extern uint32_t g_pal[256];   // 0xAARRGGBB
 extern int16_t g_sin[1024];   // Q15: ±32767 = ±1.0
 void tables_init(void);       // called by sim_init; the synth depends on it too
 
-// Input: one struct per character. What the platform layer hands a game, and the only
-// way a game's state is allowed to change.
-typedef struct { int8_t x, y; uint8_t act; } Input;
+// Input: one struct per character. What the platform layer hands a game, and the only way
+// a game's state is allowed to change.
+//
+// 🔴 x and y are the GROUND. This struct was born 2D — x, and a y that meant "up" — and a
+// 3D game needs two axes to stand on, so jump had to stop being one of them. A world you
+// can only cross in a straight line has doors you cannot reach: forms3's slot sits at z=0
+// and nothing could ever walk to it.
+typedef struct {
+    int8_t  x, y;      // ground plane. In 2D games y is unused; in a menu it's the list.
+    uint8_t jump;      // space / return
+    uint8_t act;       // the game's own verb — morph, grab, whatever it has
+} Input;
 
 // Polygon scanline fill (even-odd). pts = x0,y0,x1,y1,... 16.0 fixed point.
 void poly_fill(const int16_t *pts, int n, uint8_t ci);

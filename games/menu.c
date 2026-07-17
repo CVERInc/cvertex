@@ -89,9 +89,7 @@ static void tick(const Input in[2]) {
     int mv = y ? (y > 0 ? -1 : 1) : (x ? (x > 0 ? 1 : -1) : 0);
     if (g_cool > 0) { g_cool--; return; }
     if (mv) { g_sel = (g_sel + mv + g_n) % g_n; g_cool = 10; }
-    // W and Up are also "up", so they'd fire the instant you arrived here. Space and
-    // Return are the same act bit with no y — that's the difference, and it's free.
-    if ((in[0].act || in[1].act) && !y && g_n) g_switch_to = g_list[g_sel];
+    if ((in[0].jump || in[1].jump) && g_n) g_switch_to = g_list[g_sel];
 }
 
 static void audio(void) {}

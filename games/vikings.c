@@ -74,7 +74,7 @@ static void tick(const Input in[2]) {
     for (int i = 0; i < 2; i++) {
         Actor *a = &g_act[i];
         a->vx = in[i].x * (2 << FP) / 2;
-        if (in[i].act && a->grounded) {
+        if (in[i].jump && a->grounded) {
             a->vy = -(5 << FP); a->grounded = 0;
             g_events |= (EV_JUMP_A << i);
         }

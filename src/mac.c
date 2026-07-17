@@ -117,15 +117,16 @@ static void pump_events(id app, id mode) {
 // happily, so every test passed. A test rig that can reach somewhere the player can't is
 // a test rig that verifies a game nobody is playing.
 static void read_input(Input in[2]) {
-    // W and Up are both "up" and "jump", because in a platformer they're the same thought.
-    // Space and Return are act WITHOUT up, which is what lets a menu tell "move" from
-    // "choose" using the one act bit everybody already has.
-    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]),                    // D - A
-                     (int8_t)(g_keys[13] - g_keys[1]),                   // W - S
-                     (uint8_t)(g_keys[13] | g_keys[49]) };               // W or space
-    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),                // -> - <-
-                     (int8_t)(g_keys[126] - g_keys[125]),                // up - down
-                     (uint8_t)(g_keys[126] | g_keys[36]) };              // up or return
+    // WASD and the arrows are the ground. Jump and act get their own keys, because a 3D
+    // game needs both ground axes and can't spend one on jumping.
+    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]),        // D - A
+                     (int8_t)(g_keys[13] - g_keys[1]),       // W - S
+                     g_keys[49],                             // space
+                     g_keys[14] };                           // E
+    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),    // -> - <-
+                     (int8_t)(g_keys[126] - g_keys[125]),    // up - down
+                     g_keys[36],                             // return
+                     g_keys[60] };                           // right shift
 }
 
 int main(int argc, char **argv) {
@@ -173,7 +174,7 @@ int main(int argc, char **argv) {
             printf("  --fullscreen\n");
             printf("  --camz <units>    override a game's camera distance (dev)\n");
             printf("  --keys <string>   scripted input, one char per frame, player 1:\n");
-            printf("                      . idle   l left   r right   j jump   u up   d down\n");
+            printf("                      . idle  l/r/u/d move  j jump  a act\n");
             printf("                      uppercase does the same for player 2\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
@@ -185,13 +186,13 @@ int main(int argc, char **argv) {
     }
     // One char of the script -> one frame of input.
     #define SCRIPT(f) do { \
-        in[0] = (Input){ 0, 0, 0 }; in[1] = (Input){ 0, 0, 0 }; \
+        in[0] = (Input){ 0, 0, 0, 0 }; in[1] = (Input){ 0, 0, 0, 0 }; \
         if (keys && (size_t)(f) < strlen(keys)) { \
             char c = keys[f]; int p = (c >= 'A' && c <= 'Z') ? 1 : 0; \
             char lc = (char)(p ? c - 'A' + 'a' : c); \
             if (lc == 'l') in[p].x = -1; else if (lc == 'r') in[p].x = 1; \
-            else if (lc == 'j') { in[p].act = 1; in[p].y = 1; } \
             else if (lc == 'u') in[p].y = 1; else if (lc == 'd') in[p].y = -1; \
+            else if (lc == 'j') in[p].jump = 1; else if (lc == 'a') in[p].act = 1; \
         } \
     } while (0)
 
@@ -205,8 +206,8 @@ int main(int argc, char **argv) {
         for (int f = 0; f < n; f++) {
             Input in[2];
             if (keys) SCRIPT(f);
-            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, (f % 23) == 0 };
-                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, (f % 31) == 0 }; }
+            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, (f % 23) == 0, 0 };
+                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, (f % 31) == 0, 0 }; }
             g->tick(in);
         }
         g->draw();

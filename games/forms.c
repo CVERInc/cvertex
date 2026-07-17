@@ -125,7 +125,7 @@ static void tick(const Input in[2]) {
         // whole point is that you can't do this to yourself. It's here so the question
         // "does shape decide passage" can be answered before the answer to "who decides
         // your shape" exists.
-        if (in[i].y < 0) {          // S / down — up is jump now
+        if (in[i].act) {            // E / right-shift
             uint8_t want = (uint8_t)((a->form + 1) % NFORM);
             if (!overlaps(a->x, a->y, want)) { a->form = want; g_events |= EV_MORPH; }
             // Refusing to grow inside a wall is not politeness, it's the only thing
@@ -133,7 +133,7 @@ static void tick(const Input in[2]) {
         }
 
         a->vx = in[i].x * (2 << FP);
-        if (in[i].act && a->grounded) { a->vy = -(5 << FP); a->grounded = 0; g_events |= EV_JUMP; }
+        if (in[i].jump && a->grounded) { a->vy = -(5 << FP); a->grounded = 0; g_events |= EV_JUMP; }
         a->vy += (1 << FP) / 4;
         if (a->vy > (6 << FP)) a->vy = 6 << FP;
 
