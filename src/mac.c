@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     const char *runmode = 0; int modearg = 0;
     // The engine runs a game; which one is an argument. Nothing below this line knows
     // what the game is about.
-    const Game *g = &game_vikings;
+    const Game *g = &game_menu;   // no argument = the list, not somebody's test level
     // Scripted input, one character per frame. This is the dividend a deterministic sim
     // was always going to pay and I kept not collecting: the same string produces the
     // same run, so a question like "does a flat shape fit through that gap" gets an
