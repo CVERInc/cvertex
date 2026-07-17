@@ -127,6 +127,7 @@ int main(int argc, char **argv) {
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
+        else if (!strcmp(argv[a], "--camz") && a + 1 < argc) { g_dev_camz = (int32_t)(atof(argv[a+1]) * 65536); a++; }
         else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
             g = 0;
             for (int k = 0; k < NGAMES; k++) if (!strcmp(argv[a+1], games[k]->name)) g = games[k];
@@ -145,7 +146,8 @@ int main(int argc, char **argv) {
             for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);
             printf("\n");
             printf("  --res <w> <h>     framebuffer size (default: 640 360)\n");
-            printf("  --fullscreen\n\n");
+            printf("  --fullscreen\n");
+            printf("  --camz <units>    override a game's camera distance (dev)\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
             printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");

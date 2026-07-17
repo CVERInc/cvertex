@@ -209,10 +209,7 @@ Early. It runs, and the shape of it is settled.
 - macOS only. The Windows and Linux platform layers aren't written yet.
 - The engine ships with no artwork. `tools/svg2poly` bakes a character in; without one
   it draws placeholder polygons.
-- Near-plane handling drops any triangle with a vertex behind the camera rather
-  than clipping it properly. Invisible until geometry crosses the lens.
-- Depth sorting is per-triangle painter's algorithm, so interpenetrating
-  geometry can sort wrong.
+
 - `--dump` and other development paths still compile into the binary.
 
 ## Development

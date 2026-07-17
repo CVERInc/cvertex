@@ -45,4 +45,14 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
 void g3d_rot(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 void g3d_project(int32_t x, int32_t y, int32_t z, int16_t *sx, int16_t *sy);
 
+// A view-space triangle, ready to be clipped and drawn. Positions, not indices, because
+// clipping invents vertices that no index can name.
+typedef struct { int32_t x, y, z; } P3;
+
+// Clip one triangle against the near plane and draw what survives. A triangle with a
+// vertex behind the lens can't be projected — z goes to zero and through it — so it has
+// to be cut, not dropped. Dropping it is invisible right up until the camera moves
+// through the world, and then the world has holes in it.
+void g3d_tri(const P3 *v, uint8_t ci);
+
 #endif

@@ -14,6 +14,53 @@ static inline int32_t mul15(int32_t a, int32_t b) { return (int32_t)(((int64_t)a
 
 // Rotate Y, then X, then Z. Separate rotations cost less code than composing a
 // matrix, and they're easier to read.
+// Where the segment a->b crosses the near plane, and the point there.
+static void near_cut(const P3 *a, const P3 *b, P3 *out) {
+    int64_t d = (int64_t)b->z - a->z;
+    int64_t t = d ? (((int64_t)(NEAR - a->z) << 16) / d) : 0;   // 16.16 along the edge
+    out->x = a->x + (int32_t)(((int64_t)(b->x - a->x) * t) >> 16);
+    out->y = a->y + (int32_t)(((int64_t)(b->y - a->y) * t) >> 16);
+    out->z = NEAR;
+}
+
+static void raw_tri(const P3 *v, uint8_t ci) {
+    int16_t p[6];
+    uint32_t w[3];
+    for (int i = 0; i < 3; i++) {
+        g3d_project(v[i].x, v[i].y, v[i].z, &p[i * 2], &p[i * 2 + 1]);
+        int32_t z = v[i].z > NEAR ? v[i].z : NEAR;
+        w[i] = (uint32_t)(((int64_t)1 << 30) / z);
+    }
+    tri_fill_z(p, w, ci);
+}
+
+// Sutherland-Hodgman against one plane, which for a triangle has only four outcomes:
+// all in, all out, one in (a smaller triangle), or two in (a quad = two triangles).
+void g3d_tri(const P3 *v, uint8_t ci) {
+    const P3 *in[3], *out[3];
+    int ni = 0, no = 0;
+    for (int i = 0; i < 3; i++) {
+        if (v[i].z >= NEAR) in[ni++] = &v[i]; else out[no++] = &v[i];
+    }
+    if (no == 0) { raw_tri(v, ci); return; }
+    if (ni == 0) return;
+
+    if (ni == 1) {
+        P3 t[3] = { *in[0] };
+        near_cut(in[0], out[0], &t[1]);
+        near_cut(in[0], out[1], &t[2]);
+        raw_tri(t, ci);
+    } else {
+        P3 c0, c1;
+        near_cut(in[0], out[0], &c0);
+        near_cut(in[1], out[0], &c1);
+        P3 a[3] = { *in[0], *in[1], c1 };
+        P3 b[3] = { *in[0], c1, c0 };
+        raw_tri(a, ci);
+        raw_tri(b, ci);
+    }
+}
+
 void g3d_rot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
     int32_t x = *px, y = *py, z = *pz, t;
     int32_t s = SIN(ay), c = COS(ay);
@@ -45,7 +92,6 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         g3d_rot(&x, &y, &z, ax, ay, az);
         z += tz;
         vx[i] = x; vy[i] = y; vz[i] = z;
-        g3d_project(x, y, z, &sx[i], &sy[i]);
     }
 
     // ---- culling + depth sort (painter's algorithm): far triangles draw first
@@ -82,7 +128,7 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         keep[n++] = i;
     }
 
-    // ---- fill, depth-tested. No sort: see g3d_scene.
+    // ---- fill, depth-tested and near-clipped. No sort: see g3d_scene.
     zb_clear();
     for (int k = 0; k < n; k++) {
         const Tri *t = &m->t[keep[k]];
@@ -91,11 +137,10 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         int shade = (-nz * 8) >> 15;
         if (shade < 0) shade = 0;
         if (shade > 7) shade = 7;
-        int16_t p[6] = { sx[t->a], sy[t->a], sx[t->b], sy[t->b], sx[t->c], sy[t->c] };
-        uint32_t w[3] = { (uint32_t)(((int64_t)1 << 30) / (vz[t->a] > NEAR ? vz[t->a] : NEAR)),
-                          (uint32_t)(((int64_t)1 << 30) / (vz[t->b] > NEAR ? vz[t->b] : NEAR)),
-                          (uint32_t)(((int64_t)1 << 30) / (vz[t->c] > NEAR ? vz[t->c] : NEAR)) };
-        tri_fill_z(p, w, (uint8_t)(t->ci + shade));
+        P3 v[3] = { { vx[t->a], vy[t->a], vz[t->a] },
+                    { vx[t->b], vy[t->b], vz[t->b] },
+                    { vx[t->c], vy[t->c], vz[t->c] } };
+        g3d_tri(v, (uint8_t)(t->ci + shade));
     }
 }
 
@@ -150,7 +195,9 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
         for (int t = 0; t < m->nt && nt < MAXST; t++) {
             const Tri *tr = &m->t[t];
             int a = base + tr->a, b = base + tr->b, c = base + tr->c;
-            if (sv_z[a] < NEAR || sv_z[b] < NEAR || sv_z[c] < NEAR) continue;
+            // No near test here any more: g3d_tri cuts what crosses the lens. Dropping it
+            // was invisible until the camera moved through the world, and then the world
+            // had holes in it.
 
             int32_t nx = tr->nx, ny = tr->ny, nz = tr->nz;
             g3d_rot(&nx, &ny, &nz, in->ax, in->ay, in->az);
@@ -174,12 +221,9 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
     // per pixel, so the order these are drawn in doesn't matter at all.
     zb_clear();
     for (int i = 0; i < nt; i++) {
-        int16_t p[6] = { sv_sx[st[i].a], sv_sy[st[i].a],
-                         sv_sx[st[i].b], sv_sy[st[i].b],
-                         sv_sx[st[i].c], sv_sy[st[i].c] };
-        uint32_t w[3] = { (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].a] > NEAR ? sv_z[st[i].a] : NEAR)),
-                          (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].b] > NEAR ? sv_z[st[i].b] : NEAR)),
-                          (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].c] > NEAR ? sv_z[st[i].c] : NEAR)) };
-        tri_fill_z(p, w, st[i].ci);
+        P3 v[3] = { { sv_x[st[i].a], sv_y[st[i].a], sv_z[st[i].a] },
+                    { sv_x[st[i].b], sv_y[st[i].b], sv_z[st[i].b] },
+                    { sv_x[st[i].c], sv_y[st[i].c], sv_z[st[i].c] } };
+        g3d_tri(v, st[i].ci);
     }
 }

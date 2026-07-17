@@ -299,7 +299,7 @@ static void init(void) {
 }
 static void tick(const Input in[2]) { (void)in; g_frame++; }
 static void audio(void) {}
-static void draw(void) { fb_clear(0); title_draw(g_frame, 13 << 16); }
+static void draw(void) { fb_clear(0); title_draw(g_frame, g_dev_camz ? g_dev_camz : (13 << 16)); }
 static uint64_t checksum(void) { return g_frame; }
 
 const Game game_title = { "title", init, tick, audio, draw, checksum };

@@ -15,6 +15,7 @@ void tables_init(void) {
 
 uint8_t  g_fb[MAXFBW * MAXFBH];
 int g_fbw, g_fbh;
+int32_t g_dev_camz;
 
 void fb_resize(int w, int h) {
     if (w > MAXFBW) w = MAXFBW;

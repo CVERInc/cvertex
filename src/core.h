@@ -52,6 +52,11 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci);
 
 void fb_clear(uint8_t ci);
 
+// A camera distance a game may let the command line override, so the near plane can
+// actually be driven into. It's here rather than improvised per test because every
+// throwaway harness written today broke; the ones with names never did.
+extern int32_t g_dev_camz;   // 0 = the game decides
+
 // ---- depth ------------------------------------------------------------------
 // 🔴 A painter's algorithm sorted per triangle is not a depth test, it's a guess that
 // usually agrees with one. Two triangles whose average depths cross swap places, and a
