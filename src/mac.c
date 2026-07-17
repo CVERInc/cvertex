@@ -131,6 +131,7 @@ int main(int argc, char **argv) {
     // proves the geometry is right; this one proves it looks good — two different
     // things. A developer's eyes only, doesn't ship in a release build.
     if (argc > 2 && !strcmp(argv[1], "--ppm")) {
+        extern int g_demo_spin; if (argc > 3) g_demo_spin = 1;
         int n = atoi(argv[2]);
         Input in[2] = { { 0, 0, 0 }, { 0, 0, 0 } };
         for (int f = 0; f < n; f++) sim_tick(in);

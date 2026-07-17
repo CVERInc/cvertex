@@ -99,3 +99,28 @@ void shape_draw3d(const Shape *s, int32_t wx, int32_t wy, int32_t wz,
         poly_fill_n(t, &s->lens[f->len_off], f->nc, f->ci);
     }
 }
+
+// ---- turnarounds ------------------------------------------------------------
+
+const Shape *turn_pick(const Turn *t, int facing, int *flip, int *residual) {
+    int a = facing & 1023;
+    *flip = 0;
+    if (!t->nview) { *residual = 0; return 0; }
+    if (t->mirror && a > 512) { a = 1024 - a; *flip = 1; }   // symmetric designs only
+
+    // Nearest drawn angle, measured the short way round the circle.
+    int idx = 0, bd = 32767;
+    for (int i = 0; i < t->nview; i++) {
+        int d = ((a - t->angle[i] + 512) & 1023) - 512;
+        if (d < 0) d = -d;
+        if (d < bd) { bd = d; idx = i; }
+    }
+
+    // Doom snapped and you could see it snap. We hand the leftover angle back so the
+    // chosen view keeps turning the rest of the way in shape_draw3d — the drawing
+    // changes on a step, the motion doesn't. It also means a gap in the sheet costs
+    // accuracy, not correctness.
+    int r = ((a - t->angle[idx] + 512) & 1023) - 512;
+    *residual = *flip ? -r : r;
+    return t->view[idx];
+}

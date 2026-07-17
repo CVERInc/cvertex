@@ -9,7 +9,7 @@
 #if defined(__has_include)
 #  if __has_include("local/shape_demo.h")
 #    include "local/shape_demo.h"
-#    define HAVE_DEMO_SHAPE 1
+#    define HAVE_DEMO_TURN 1
 #  endif
 #endif
 
@@ -87,14 +87,14 @@ void poly_fill(const int16_t *pts, int n, uint8_t ci) {
 // ---- deterministic simulation ---------------------------------------------------
 // Fixed point: 1 unit = 1/256 pixel. Integer math → bit-exact reproducibility.
 #define FP 8
-typedef struct { int32_t x, y, vx, vy; uint8_t grounded; } Actor;
+typedef struct { int32_t x, y, vx, vy; int16_t facing; uint8_t grounded; } Actor;
 static Actor g_act[2];
 uint64_t g_checksum;   // determinism self-check
 
 void sim_init(void) {
     tables_init();
-    g_act[0] = (Actor){ 80 << FP, 100 << FP, 0, 0, 0 };
-    g_act[1] = (Actor){ 240 << FP, 100 << FP, 0, 0, 0 };
+    g_act[0] = (Actor){ 80 << FP, 100 << FP, 0, 0, 256, 0 };   // 256 = facing right
+    g_act[1] = (Actor){ 240 << FP, 100 << FP, 0, 0, 768, 0 };  // 768 = facing left
     g_checksum = 0;
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
     g_pal[0] = 0xFF1A1C2C;  // background
@@ -109,13 +109,14 @@ void sim_init(void) {
         int r = 30 + i * 26, g = 90 + i * 22, b = 120 + i * 18;
         g_pal[8 + i] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
     }
-#ifdef HAVE_DEMO_SHAPE
-    shape_install_palette(&g_demo);
+#ifdef HAVE_DEMO_TURN
+    shape_install_palette(g_hero.view[0]);   // one shared palette; any view carries it
 #endif
     g_frame = 0;
 }
 
 uint32_t g_frame;
+int g_demo_spin;   // dev: spin the characters to inspect the turnaround
 
 #define GROUND (150 << FP)
 #define CAMZ    (5 << 16)      // camera distance. The sim never sees this.
@@ -144,7 +145,15 @@ void sim_tick(const Input in[2]) {
         }
         if (a->x < (8 << FP))         a->x = 8 << FP;
         if (a->x > ((FBW - 8) << FP)) a->x = (FBW - 8) << FP;
-        g_checksum = g_checksum * 31 + (uint32_t)a->x + (uint32_t)a->y;
+        // Turning is state, not decoration: reverse direction and she rotates through
+        // the drawn views to get there instead of flipping in a single frame.
+        if (in[i].x) {
+            int want = in[i].x > 0 ? 256 : 768;
+            int diff = ((want - a->facing + 512) & 1023) - 512;   // shortest way round
+            int step = diff > 40 ? 40 : (diff < -40 ? -40 : diff);
+            a->facing = (int16_t)((a->facing + step) & 1023);
+        }
+        g_checksum = g_checksum * 31 + (uint32_t)a->x + (uint32_t)a->y + (uint32_t)a->facing;
     }
 }
 
@@ -160,18 +169,17 @@ void sim_draw(void) {
     // The two characters.
     for (int i = 0; i < 2; i++) {
         int cx = g_act[i].x >> FP, cy = g_act[i].y >> FP;
-#ifdef HAVE_DEMO_SHAPE
+#ifdef HAVE_DEMO_TURN
         // Gameplay is 2D, so the sim only ever thinks in screen pixels. The conversion
         // happens here and nowhere else — the one place that opinion meets the camera.
         int32_t wpp = world_per_px(CAMZ);
         int cyc = cy + FOOT - (int)(CH_PX / 2);          // soles on the actor, not the middle
         int32_t wx =  (cx - FBW / 2) * wpp;
         int32_t wy = -(cyc - FBH / 2) * wpp;
-        // Lean into the direction of travel: body language for free, out of a rotation
-        // the renderer was doing anyway.
-        int lean = (g_act[i].vx * 40) >> FP;
-        if (lean > 70) lean = 70; else if (lean < -70) lean = -70;
-        shape_draw3d(&g_demo, wx, wy, CAMZ, 0, lean, 0, CH_SIZE, 9000, i == 1);
+        int flip, residual;
+        int fc = g_demo_spin ? (int)((g_frame * 4) & 1023) : g_act[i].facing;
+        const Shape *v = turn_pick(&g_hero, fc, &flip, &residual);
+        if (v) shape_draw3d(v, wx, wy, CAMZ, 0, residual, 0, CH_SIZE, 9000, flip);
 #else
         // No art present (a clean checkout): a placeholder body, so the engine still runs.
         int16_t body[12] = {

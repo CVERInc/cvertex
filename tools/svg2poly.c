@@ -6,9 +6,22 @@
 // instead: beziers get flattened here, colours get clustered here, and the engine
 // only ever receives "a string of points + a palette index."
 //
+// Several SVGs in, ONE header out, and they SHARE:
+//   - one palette. A tracer clusters each drawing on its own, so the same white comes
+//     out #fcfcfb here and #fdfdfc there — measured ΔE 0.35, when the eye can't see a
+//     difference below about 2.3. Left alone that's 43 colours for what is really 8,
+//     and it breaks the whole point of an indexed framebuffer: edit one table and the
+//     game changes season. Colours within ΔE_MERGE become one entry.
+//   - one scale. Normalizing each view to its own bounding box would make the
+//     character grow and shrink as it turns.
+// ΔE is CIE76 on purpose: CIEDE2000 was measured WORSE under noise in a sibling
+// project (it de-weights lightness, which is exactly what separates these). Don't retry it.
+//
 //   cc -O2 -o svg2poly tools/svg2poly.c -lm
-//   ./svg2poly hero.svg hero 16 > src/shape_hero.h
-//                       ^name ^palette base index
+//   ./svg2poly hero 16 0:v0.svg 45:v1.svg 90:v2.svg 135:v3.svg 225:v4.svg ... > out.h
+//              ^name ^base   ^degrees:file, ascending, 0..359
+//   Pass --mirror to cover only 0..180 and let the engine reflect the far half. That is
+//   ONLY correct for a symmetric design; anything asymmetric must draw the full turn.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,8 +36,23 @@ static double px[MAXPT], py[MAXPT];
 static int    np;
 static int    clen[MAXCONT], nc;                 // point count per contour
 static struct { int c0, ncont, pal; } fl[MAXFILL];
+static struct { int f0, nf, c0, nc, p0, np; } vw[16]; static int nvw;
 static int    nf;
 static unsigned pal[MAXPAL]; static int npal;
+static double pal_lab[MAXPAL][3];
+static int    pal_n[MAXPAL];          // how many source colours merged into this entry
+#define DE_MERGE 3.0                  // below the eye's threshold (~2.3), safely the same colour
+
+static void to_lab(unsigned rgb, double *L) {
+    double c[3] = { ((rgb >> 16) & 255) / 255.0, ((rgb >> 8) & 255) / 255.0, (rgb & 255) / 255.0 };
+    for (int i = 0; i < 3; i++) c[i] = c[i] <= 0.04045 ? c[i] / 12.92 : pow((c[i] + 0.055) / 1.055, 2.4);
+    double X = (c[0]*0.4124 + c[1]*0.3576 + c[2]*0.1805) / 0.95047;
+    double Y =  c[0]*0.2126 + c[1]*0.7152 + c[2]*0.0722;
+    double Z = (c[0]*0.0193 + c[1]*0.1192 + c[2]*0.9505) / 1.08883;
+    double f[3], t[3] = { X, Y, Z };
+    for (int i = 0; i < 3; i++) f[i] = t[i] > 0.008856 ? cbrt(t[i]) : 7.787 * t[i] + 16.0 / 116.0;
+    L[0] = 116 * f[1] - 16; L[1] = 500 * (f[0] - f[1]); L[2] = 200 * (f[1] - f[2]);
+}
 
 // Flattening tolerance: squared control-point-to-chord distance / squared chord length. Smaller = finer.
 static double TOL = 0.02;
@@ -42,9 +70,29 @@ static void bez(double x0,double y0,double x1,double y1,double x2,double y2,doub
     bez(xm,ym,xb,yb,x23,y23,x3,y3,d+1);
 }
 
+// Nearest existing entry within DE_MERGE, else a new one. The entry keeps a running
+// mean in Lab so a cluster settles on its centre rather than on whichever view came first.
 static int palidx(unsigned rgb) {
-    for (int i = 0; i < npal; i++) if (pal[i] == rgb) return i;
-    if (npal < MAXPAL) { pal[npal] = rgb; return npal++; }
+    double L[3]; to_lab(rgb, L);
+    int best = -1; double bd = 1e30;
+    for (int i = 0; i < npal; i++) {
+        double d = 0;
+        for (int k = 0; k < 3; k++) { double e = L[k] - pal_lab[i][k]; d += e * e; }
+        d = sqrt(d);
+        if (d < bd) { bd = d; best = i; }
+    }
+    if (best >= 0 && bd < DE_MERGE) {
+        for (int k = 0; k < 3; k++)
+            pal_lab[best][k] = (pal_lab[best][k] * pal_n[best] + L[k]) / (pal_n[best] + 1);
+        pal_n[best]++;
+        return best;
+    }
+    if (npal < MAXPAL) {
+        pal[npal] = rgb;
+        for (int k = 0; k < 3; k++) pal_lab[npal][k] = L[k];
+        pal_n[npal] = 1;
+        return npal++;
+    }
     return 0;
 }
 
@@ -113,46 +161,58 @@ static int attr(const char *tag, const char *name, char *out, int cap) {
 }
 
 int main(int argc, char **argv) {
-    if (argc < 3) { fprintf(stderr, "usage: svg2poly <in.svg> <name> [palette base=16] [tolerance=0.02]\n"); return 1; }
-    const char *name = argv[2];
-    int base = argc > 3 ? atoi(argv[3]) : 16;
-    if (argc > 4) TOL = atof(argv[4]);
-
-    FILE *f = fopen(argv[1], "rb");
-    if (!f) { fprintf(stderr, "svg2poly: can't open %s\n", argv[1]); return 1; }
-    static char buf[1 << 22];
-    long n = (long)fread(buf, 1, sizeof buf - 1, f); buf[n] = 0; fclose(f);
-
-    // Walk each <path> in document order = back-to-front draw order (this is how a tracer emits them)
-    const char *p = buf;
-    static char d[1 << 20], fill[64];
-    while ((p = strstr(p, "<path")) != NULL) {
-        const char *end = strchr(p, '>'); if (!end) break;
-        long len = end - p; if (len > (long)sizeof d - 1) len = sizeof d - 1;
-        static char tag[1 << 20];
-        memcpy(tag, p, len); tag[len] = 0;
-        p = end;
-
-        if (!attr(tag, "d", d, sizeof d)) continue;
-        unsigned rgb = 0;
-        if (attr(tag, "fill", fill, sizeof fill) && fill[0] == '#') {
-            if (strlen(fill) == 7) rgb = (unsigned)strtoul(fill + 1, NULL, 16);
-            else if (strlen(fill) == 4) {                     // #abc → #aabbcc
-                unsigned v = (unsigned)strtoul(fill + 1, NULL, 16);
-                rgb = ((v & 0xF00) * 0x1100) | ((v & 0x0F0) * 0x110) | ((v & 0x00F) * 0x11);
-            }
-        }
-        if (!strcmp(fill, "none")) continue;
-
-        int c0 = nc, p0 = np;
-        parse_d(d);
-        if (nc == c0) continue;                               // produced no contours
-        (void)p0;
-        if (nf < MAXFILL) { fl[nf].c0 = c0; fl[nf].ncont = nc - c0; fl[nf].pal = palidx(rgb); nf++; }
+    if (argc < 4) {
+        fprintf(stderr, "usage: svg2poly <name> <palette base> <view.svg>...   (views ordered 0..180 degrees)\n");
+        return 1;
     }
-    if (!np) { fprintf(stderr, "svg2poly: no paths in %s\n", argv[1]); return 1; }
+    const char *name = argv[1];
+    int base = atoi(argv[2]);
+    int mirror = 0, argstart = 3;
+    for (int a = 3; a < argc; a++) if (!strcmp(argv[a], "--mirror")) { mirror = 1; argstart = a + 1; }
 
-    // Center + normalize: longest edge → 32768 (±16384)
+    static char buf[1 << 22], d[1 << 20], fill[64], tag[1 << 20];
+    static int deg[16];
+    for (int a = argstart; a < argc && nvw < 16; a++) {
+        const char *spec = argv[a], *colon = strchr(spec, ':');
+        if (!colon) { fprintf(stderr, "svg2poly: expected <degrees>:<file>, got %s\n", spec); return 1; }
+        deg[nvw] = atoi(spec);
+        int limit = mirror ? 180 : 359;
+        if (deg[nvw] < 0 || deg[nvw] > limit) { fprintf(stderr, "svg2poly: %d out of 0..%d\n", deg[nvw], limit); return 1; }
+        if (nvw && deg[nvw] <= deg[nvw-1]) { fprintf(stderr, "svg2poly: angles must ascend\n"); return 1; }
+        FILE *f = fopen(colon + 1, "rb");
+        if (!f) { fprintf(stderr, "svg2poly: can't open %s\n", colon + 1); return 1; }
+        long n = (long)fread(buf, 1, sizeof buf - 1, f); buf[n] = 0; fclose(f);
+
+        vw[nvw].f0 = nf; vw[nvw].c0 = nc; vw[nvw].p0 = np;
+        const char *p = buf;
+        while ((p = strstr(p, "<path")) != NULL) {
+            const char *end = strchr(p, '>'); if (!end) break;
+            long len = end - p; if (len > (long)sizeof tag - 1) len = sizeof tag - 1;
+            memcpy(tag, p, len); tag[len] = 0;
+            p = end;
+            if (!attr(tag, "d", d, sizeof d)) continue;
+            unsigned rgb = 0;
+            fill[0] = 0;
+            if (attr(tag, "fill", fill, sizeof fill) && fill[0] == '#') {
+                if (strlen(fill) == 7) rgb = (unsigned)strtoul(fill + 1, NULL, 16);
+                else if (strlen(fill) == 4) {
+                    unsigned v = (unsigned)strtoul(fill + 1, NULL, 16);
+                    rgb = ((v & 0xF00) * 0x1100) | ((v & 0x0F0) * 0x110) | ((v & 0x00F) * 0x11);
+                }
+            }
+            if (!strcmp(fill, "none")) continue;
+            int c0 = nc;
+            parse_d(d);
+            if (nc == c0) continue;
+            if (nf < MAXFILL) { fl[nf].c0 = c0; fl[nf].ncont = nc - c0; fl[nf].pal = palidx(rgb); nf++; }
+        }
+        vw[nvw].nf = nf - vw[nvw].f0; vw[nvw].nc = nc - vw[nvw].c0; vw[nvw].np = np - vw[nvw].p0;
+        if (!vw[nvw].nf) { fprintf(stderr, "svg2poly: no paths in %s\n", colon + 1); return 1; }
+        nvw++;
+    }
+
+    // ONE scale and ONE centre across every view. Per-view normalization would make the
+    // character grow, shrink and drift as it turns.
     double lo[2] = { 1e30, 1e30 }, hi[2] = { -1e30, -1e30 };
     for (int i = 0; i < np; i++) {
         if (px[i] < lo[0]) lo[0] = px[i]; if (px[i] > hi[0]) hi[0] = px[i];
@@ -160,27 +220,36 @@ int main(int argc, char **argv) {
     }
     double ext = (hi[0]-lo[0] > hi[1]-lo[1]) ? hi[0]-lo[0] : hi[1]-lo[1];
     if (ext <= 0) ext = 1;
-    double s = 32768.0 / ext, mx = (lo[0]+hi[0])/2, my = (lo[1]+hi[1])/2;
+    double sc = 32768.0 / ext, mx = (lo[0]+hi[0])/2, my = (lo[1]+hi[1])/2;
 
-    printf("// generated by svg2poly from %s. Don't hand-edit — change the artwork and rebuild.\n", argv[1]);
-    printf("// %d points / %d contours / %d fills / %d colours\n", np, nc, nf, npal);
-    printf("static const int16_t %s_pts[%d] = {\n", name, np * 2);
-    for (int i = 0; i < np; i++)
-        printf("%d,%d,%s", (int)lrint((px[i]-mx)*s), (int)lrint((py[i]-my)*s), (i % 8 == 7) ? "\n" : "");
-    printf("\n};\nstatic const uint16_t %s_lens[%d] = {\n", name, nc);
-    for (int i = 0; i < nc; i++) printf("%d,%s", clen[i], (i % 16 == 15) ? "\n" : "");
-    printf("\n};\nstatic const Fill %s_f[%d] = {\n", name, nf);
-    int ptoff = 0;
-    for (int i = 0; i < nf; i++) {
-        printf("  {%d,%d,%d,%d},\n", ptoff, fl[i].c0, fl[i].ncont, base + fl[i].pal);
-        for (int c = 0; c < fl[i].ncont; c++) ptoff += clen[fl[i].c0 + c];
-    }
-    printf("};\nstatic const uint32_t %s_pal[%d] = {\n", name, npal);
+    printf("// generated by svg2poly. Don't hand-edit — change the art and rebuild.\n");
+    printf("// %d views / %d points / %d contours / %d fills / %d shared colours\n", nvw, np, nc, nf, npal);
+    printf("static const uint32_t %s_pal[%d] = {\n", name, npal);
     for (int i = 0; i < npal; i++) printf("  0xFF%06X,\n", pal[i]);
-    printf("};\nconst Shape g_%s = { %s_pts, %s_lens, %s_f, %d, %s_pal, %d, %d };\n",
-           name, name, name, name, nf, name, npal, base);
+    printf("};\n");
 
-    fprintf(stderr, "svg2poly: %s → %d points / %d contours / %d fills / %d colours → %d bytes\n",
-            argv[1], np, nc, nf, npal, np * 4 + nc * 2 + nf * 6 + npal * 4);
+    for (int v = 0; v < nvw; v++) {
+        printf("static const int16_t %s_%d_pts[%d] = {\n", name, v, vw[v].np * 2);
+        for (int i = vw[v].p0; i < vw[v].p0 + vw[v].np; i++)
+            printf("%d,%d,%s", (int)lrint((px[i]-mx)*sc), (int)lrint((py[i]-my)*sc), (i % 8 == 7) ? "\n" : "");
+        printf("\n};\nstatic const uint16_t %s_%d_lens[%d] = {\n", name, v, vw[v].nc);
+        for (int i = vw[v].c0; i < vw[v].c0 + vw[v].nc; i++) printf("%d,%s", clen[i], (i % 16 == 15) ? "\n" : "");
+        printf("\n};\nstatic const Fill %s_%d_f[%d] = {\n", name, v, vw[v].nf);
+        int ptoff = 0;
+        for (int i = vw[v].f0; i < vw[v].f0 + vw[v].nf; i++) {
+            printf("  {%d,%d,%d,%d},\n", ptoff, fl[i].c0 - vw[v].c0, fl[i].ncont, base + fl[i].pal);
+            for (int c = 0; c < fl[i].ncont; c++) ptoff += clen[fl[i].c0 + c];
+        }
+        printf("};\nstatic const Shape %s_%d = { %s_%d_pts, %s_%d_lens, %s_%d_f, %d, %s_pal, %d, %d };\n",
+               name, v, name, v, name, v, name, v, vw[v].nf, name, npal, base);
+    }
+    printf("static const Shape *const %s_views[%d] = {", name, nvw);
+    for (int v = 0; v < nvw; v++) printf(" &%s_%d,", name, v);
+    printf(" };\nstatic const uint16_t %s_angles[%d] = {", name, nvw);
+    for (int v = 0; v < nvw; v++) printf(" %d,", deg[v] * 1024 / 360);   // degrees -> g3d units
+    printf(" };\nconst Turn g_%s = { %s_views, %s_angles, %d, %d };\n", name, name, name, nvw, mirror);
+
+    fprintf(stderr, "svg2poly: %d views%s -> %d points / %d fills / %d shared colours -> %d bytes\n",
+            nvw, mirror ? " (+mirrored half)" : " (full turn)", np, nf, npal, np * 4 + nc * 2 + nf * 6 + npal * 4);
     return 0;
 }

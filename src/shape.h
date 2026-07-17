@@ -45,4 +45,33 @@ void shape_draw3d(const Shape *s, int32_t wx, int32_t wy, int32_t wz,
 // space (gameplay is 2D); this is the one place that opinion meets the 3D camera.
 int32_t world_per_px(int32_t wz);
 
+// ---- turnarounds -----------------------------------------------------------
+// A character drawn from several angles. Doom (1993) did this with bitmaps: pick
+// the sprite that matches the angle between the viewer and the actor. Ours are
+// polygons, so the same trick costs a fraction of the bytes, scales without
+// blurring, and each view still gets real thickness from shape_draw3d.
+//
+// Each view carries its OWN angle rather than being assumed evenly spaced. An artist
+// draws the angles a character needs, not the angles a formula wants, and the gaps are
+// real. A missing angle isn't a bug: the nearest view rotates the rest of the way.
+//
+// 🔴 `mirror` is opt-in and must stay that way. Reflecting the near half to cover the
+// far half is free and tempting, and it is WRONG for any character whose design isn't
+// symmetric — a scar, a satchel, a parting, a single earring all jump to the other side
+// when mirrored. That failure looks completely normal until somebody notices. Only set
+// it when the design is genuinely symmetric; otherwise draw the full turn. Bytes are
+// the cheapest thing we have here, and a wrong character is not.
+typedef struct {
+    const Shape *const *view;
+    const uint16_t     *angle;   // ascending, same units as g3d (1024 = full turn)
+    uint8_t nview;
+    uint8_t mirror;              // 1 = angles cover 0..512 and the far half is reflected
+} Turn;
+
+// facing: 0..1023 around the circle, same units as g3d angles.
+// Picks the nearest view, mirrors it when facing the other half, and returns the
+// residual angle so the shape can still rotate the rest of the way — the sprite
+// snaps, the geometry doesn't.
+const Shape *turn_pick(const Turn *t, int facing, int *flip, int *residual);
+
 #endif
