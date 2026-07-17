@@ -79,6 +79,19 @@ void g3d_project(int32_t x, int32_t y, int32_t z, int16_t *sx, int16_t *sy) {
     *sy = (int16_t)(g_fbh / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
 }
 
+// g3d_rot turns about Y, then X, then Z. Undoing that means Z, then X, then Y, each
+// negated — reverse the order as well as the signs, or two axes at once come out wrong.
+void g3d_unrot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
+    int32_t x = *px, y = *py, z = *pz, t;
+    int32_t s = SIN(-az), c = COS(-az);
+    t = mul15(x, c) - mul15(y, s);  y = mul15(y, c) + mul15(x, s);  x = t;
+    s = SIN(-ax); c = COS(-ax);
+    t = mul15(y, c) - mul15(z, s);  z = mul15(z, c) + mul15(y, s);  y = t;
+    s = SIN(-ay); c = COS(-ay);
+    t = mul15(x, c) + mul15(z, s);  z = mul15(z, c) - mul15(x, s);  x = t;
+    *px = x; *py = y; *pz = z;
+}
+
 #define MAXV 2048
 #define MAXT 4096
 
@@ -170,7 +183,7 @@ static int32_t sv_x[MAXSV], sv_y[MAXSV], sv_z[MAXSV];
 static int16_t sv_sx[MAXSV], sv_sy[MAXSV];
 static struct { uint16_t a, b, c; uint8_t ci; } st[MAXST];
 
-void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz) {
+void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int rz) {
     int nv = 0, nt = 0;
 
     for (int i = 0; i < ninst; i++) {
@@ -185,8 +198,9 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
             int32_t z = (int32_t)(((int64_t)m->v[v].z * in->scale) >> 16);
             g3d_rot(&x, &y, &z, in->ax, in->ay, in->az);
             x += in->pos.x; y += in->pos.y; z += in->pos.z;
-            g3d_rot(&x, &y, &z, rx, ry, rz);          // the scene's own turn
-            z += camz;
+            g3d_rot(&x, &y, &z, rx, ry, rz);          // the scene's own turn -> world
+            x -= cam->pos.x; y -= cam->pos.y; z -= cam->pos.z;
+            g3d_unrot(&x, &y, &z, cam->ax, cam->ay, cam->az);   // world -> view
             sv_x[nv] = x; sv_y[nv] = y; sv_z[nv] = z;
             g3d_project(x, y, z, &sv_sx[nv], &sv_sy[nv]);
             nv++;
@@ -202,6 +216,7 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
             int32_t nx = tr->nx, ny = tr->ny, nz = tr->nz;
             g3d_rot(&nx, &ny, &nz, in->ax, in->ay, in->az);
             g3d_rot(&nx, &ny, &nz, rx, ry, rz);
+            g3d_unrot(&nx, &ny, &nz, cam->ax, cam->ay, cam->az);
             int32_t cx = (sv_x[a] + sv_x[b] + sv_x[c]) / 3;
             int32_t cy = (sv_y[a] + sv_y[b] + sv_y[c]) / 3;
             int32_t cz = (sv_z[a] + sv_z[b] + sv_z[c]) / 3;

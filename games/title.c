@@ -178,6 +178,7 @@ static void path_at(const int16_t wp[5][3], int u, V3 *p) {
 static uint32_t g_frame;
 
 static void title_draw(uint32_t frame, int32_t camz) {
+    Cam cam = { { 0, 0, -camz }, 0, 0, 0 };   // the old fixed lens, said properly
     static Inst inst[N];
     int t = (int)(frame % T_TOTAL);
 
@@ -283,7 +284,7 @@ static void title_draw(uint32_t frame, int32_t camz) {
         int e = ease_io((t - T_ROCK - T_OUT - T_WAIT - T_DANCE) * 1024 / T_UPRIGHT);
         sy = (int)((int64_t)((int64_t)T_DANCE * 1024 / T_SPINREV) * (1024 - e) >> 10);
     }
-    g3d_scene(inst, N, camz, sx, sy, sz);
+    g3d_scene(inst, N, &cam, sx, sy, sz);
 }
 
 // ---- the game ---------------------------------------------------------------

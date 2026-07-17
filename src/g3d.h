@@ -28,6 +28,14 @@ typedef struct {
     int32_t scale;       // 16.16; 1<<16 = the mesh's own size
 } Inst;
 
+// A camera: somewhere to stand and somewhere to look. Until this existed the world was
+// something placed in front of a lens at a fixed distance — you could turn the world, but
+// you could not go anywhere. A camera is the difference between a display and a place.
+typedef struct {
+    V3  pos;             // where it stands, world units
+    int ax, ay, az;      // where it looks
+} Cam;
+
 // 🔴 Draw a whole scene at once, because a painter's algorithm sorted per MESH is not
 // sorted. Draw two meshes one after the other and every triangle of the second lands on
 // top of the first, whatever the depth says. The sort has to see the entire scene, so
@@ -35,9 +43,15 @@ typedef struct {
 //
 // rx/ry/rz rotate the SCENE — every instance's position orbits and its mesh turns with
 // it. Without this there is no way to say "the whole thing spins": rotating each Inst
-// instead spins 27 objects on the spot, which looks close enough to right while the
-// angle is small and falls apart the moment an instance also has a rotation of its own.
-void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz);
+// instead spins 27 objects on the spot, which looks close enough while the angle is small
+// and falls apart the moment an instance also has a rotation of its own.
+void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int rz);
+
+// The inverse of g3d_rot. A camera doesn't move the world, it moves the point of view —
+// which is the same arithmetic backwards, and backwards means the axes come off in the
+// opposite order too. Getting only the signs right and not the order gives you a rotation
+// that's correct on one axis at a time and wrong the moment you use two.
+void g3d_unrot(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 
 // The transform, exposed so flat vector shapes ride the SAME pipeline as meshes
 // instead of growing a second one. Anything that can produce three coordinates gets
