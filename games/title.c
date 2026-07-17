@@ -134,7 +134,12 @@ static int clamp01(int t) { return t < 0 ? 0 : (t > 1024 ? 1024 : t); }
 
 // SceneKit's three timing modes, approximated. Theirs are cubic beziers; these are the
 // standard cheap equivalents, and the difference is well under a frame.
-static int ease_io(int t) { t = clamp01(t); return (int)(((int64_t)t * t * (3*1024 - 2*t)) >> 21); }
+//
+// 🔴 >>20, not >>21. smoothstep is t*t*(3-2t); at t=1 that's 1024*1024*1024 = 2^30, and
+// 2^30>>20 = 1024. Shifting one bit too far makes every eased move stop dead at HALFWAY
+// and then snap to its target when the phase ends. It doesn't read as "the easing is
+// wrong" — it reads as the colours flickering, because what you see is the snap.
+static int ease_io(int t) { t = clamp01(t); return (int)(((int64_t)t * t * (3*1024 - 2*t)) >> 20); }
 static int ease_in(int t)  { t = clamp01(t); return (int)(((int64_t)t * t) >> 10); }
 static int ease_out(int t) { t = clamp01(t); int u = 1024 - t; return 1024 - (int)(((int64_t)u * u) >> 10); }
 
@@ -176,9 +181,12 @@ static void title_draw(uint32_t frame, int32_t camz) {
     static Inst inst[N];
     int t = (int)(frame % T_TOTAL);
 
-    int state = 0;
-    if (t >= T_ROCK + T_OUT && t < T_ROCK + T_OUT + T_DANCE)
-        state = (t - T_ROCK - T_OUT) / T_MOVE;
+    // 🔴 The dance starts at T_ROCK + T_OUT + T_WAIT. Reading it from T_ROCK + T_OUT
+    // instead snaps the colours three frames before the layer they belong to finishes
+    // turning — which looks exactly like the cube flickering, not like an off-by-three.
+    // Same expression as the dance's own mi, deliberately: two copies drift.
+    int dance_t = t - (T_ROCK + T_OUT + T_WAIT);
+    int state = (dance_t >= 0 && dance_t < T_DANCE) ? dance_t / T_MOVE : 0;
     paint(state);
 
     // The C's gentle 3-axis float, straight out of startCRock(): small angles at
@@ -225,7 +233,14 @@ static void title_draw(uint32_t frame, int32_t camz) {
             if (in_layer) {
                 int a = DANCE_QT[mi] * 256 * e / 1024;
                 int axi = DANCE_AXIS[mi];
-                if (axi == 2) a = -a;                       // our Z points the other way
+                // 🔴 Our Z is the other way, so a rotation converts as S*R*S with
+                // S = diag(1,1,-1) — which negates exactly the elements with one index
+                // equal to 2. For Rx and Ry those are the sin terms, so both come back as
+                // R(-a); for Rz they're all zero, so Rz is unchanged. X and Y flip, Z
+                // does NOT. I had it exactly backwards, and the tell was a pop at the
+                // move boundary: the geometry turned one way while the (correct) colours
+                // advanced the other.
+                if (axi != 2) a = -a;
                 int32_t sn = g_sin[a & 1023], co = g_sin[(a + 256) & 1023];
                 int32_t px = h.x, py = h.y, pz = h.z, tmp;
                 if (axi == 0)      { tmp = ((int64_t)py*co - (int64_t)pz*sn) >> 15;

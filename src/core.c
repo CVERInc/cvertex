@@ -83,3 +83,64 @@ void poly_fill(const int16_t *pts, int n, uint8_t ci) {
     uint16_t one = (uint16_t)n;
     poly_fill_n(pts, &one, 1, ci);
 }
+
+
+// ---- depth-buffered triangles ------------------------------------------------
+
+uint32_t g_zb[MAXFBW * MAXFBH];
+
+void zb_clear(void) {
+    for (int i = 0; i < g_fbw * g_fbh; i++) g_zb[i] = 0;   // 0 = infinitely far
+}
+
+// Scanline fill with a per-pixel depth test. Only 1/z is linear in screen space, so
+// that's what's interpolated — the alternative is a depth test that's subtly wrong in
+// exactly the places perspective matters.
+void tri_fill_z(const int16_t *xy, const uint32_t *w, uint8_t ci) {
+    int x0 = xy[0], y0 = xy[1], x1 = xy[2], y1 = xy[3], x2 = xy[4], y2 = xy[5];
+    int miny = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
+    int maxy = y0 > y1 ? (y0 > y2 ? y0 : y2) : (y1 > y2 ? y1 : y2);
+    if (miny < 0) miny = 0;
+    if (maxy > g_fbh - 1) maxy = g_fbh - 1;
+    if (miny > maxy) return;
+
+    // Edge function denominator: twice the signed area. Zero = degenerate, nothing to do.
+    int32_t area = (int32_t)(x1 - x0) * (y2 - y0) - (int32_t)(x2 - x0) * (y1 - y0);
+    if (area == 0) return;
+
+    for (int y = miny; y <= maxy; y++) {
+        int xs[3], ws_i = 0;
+        int32_t xl = 0, xr = 0;
+        // Find this scanline's span from the three edges.
+        int cnt = 0; int px[3];
+        int vx[3] = { x0, x1, x2 }, vy[3] = { y0, y1, y2 };
+        for (int e = 0; e < 3 && cnt < 2; e++) {
+            int a = e, b = (e + 1) % 3;
+            int ya = vy[a], yb = vy[b];
+            if (ya == yb) continue;
+            int lo = ya < yb ? ya : yb, hi = ya < yb ? yb : ya;
+            if (y < lo || y >= hi) continue;
+            px[cnt++] = vx[a] + (int)((int32_t)(y - ya) * (vx[b] - vx[a]) / (yb - ya));
+        }
+        if (cnt < 2) continue;
+        xl = px[0] < px[1] ? px[0] : px[1];
+        xr = px[0] < px[1] ? px[1] : px[0];
+        if (xr < 0 || xl > g_fbw - 1) continue;
+        if (xl < 0) xl = 0;
+        if (xr > g_fbw - 1) xr = g_fbw - 1;
+
+        uint8_t *row = &g_fb[y * g_fbw];
+        uint32_t *zrow = &g_zb[y * g_fbw];
+        for (int x = xl; x <= xr; x++) {
+            // Barycentric from edge functions — exact, and it gives the 1/z weights.
+            int32_t b0 = (int32_t)(x1 - x) * (y2 - y) - (int32_t)(x2 - x) * (y1 - y);
+            int32_t b1 = (int32_t)(x2 - x) * (y0 - y) - (int32_t)(x0 - x) * (y2 - y);
+            int32_t b2 = area - b0 - b1;
+            int64_t ww = ((int64_t)b0 * w[0] + (int64_t)b1 * w[1] + (int64_t)b2 * w[2]) / area;
+            if (ww <= 0) continue;
+            uint32_t d = (uint32_t)ww;
+            if (d > zrow[x]) { zrow[x] = d; row[x] = ci; }
+        }
+        (void)xs; (void)ws_i;
+    }
+}

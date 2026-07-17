@@ -52,4 +52,21 @@ void poly_fill_n(const int16_t *pts, const uint16_t *lens, int nc, uint8_t ci);
 
 void fb_clear(uint8_t ci);
 
+// ---- depth ------------------------------------------------------------------
+// 🔴 A painter's algorithm sorted per triangle is not a depth test, it's a guess that
+// usually agrees with one. Two triangles whose average depths cross swap places, and a
+// far face paints over a near one for a frame — which reads as colours flickering, not
+// as a sorting bug, which is why it survived so long.
+//
+// So: a real depth buffer. It's __bss, so it costs nothing on disk at any resolution,
+// and it's period-correct — Quake shipped one.
+//
+// 1/z is what's interpolated, not z: only the reciprocal is linear in screen space.
+// Larger means nearer.
+extern uint32_t g_zb[MAXFBW * MAXFBH];
+void zb_clear(void);
+
+// A depth-tested triangle. p = x,y screen and w = (1<<30)/z per vertex.
+void tri_fill_z(const int16_t *xy, const uint32_t *w, uint8_t ci);
+
 #endif

@@ -59,9 +59,8 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
     // lighting was dead. That's the hardest kind of bug — it looks correct.
     // Now both paths read rn[]: flip a model's normals and the whole object turns
     // inside out, which is a mistake you can see and understand in a modelling tool.
-    int order[MAXT], n = 0;
-    int32_t depth[MAXT];
-    static int16_t rnz[MAXT];                            // rotated normal z, kept for lighting
+    int n = 0;
+    static int keep[MAXT];                // the triangles that survived culling
     for (int i = 0; i < m->nt && i < MAXT; i++) {
         const Tri *t = &m->t[i];
         // ⚠️ Near plane: drop the whole triangle if any vertex is behind the camera.
@@ -80,29 +79,23 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         int32_t cz = (vz[t->a] + vz[t->b] + vz[t->c]) / 3;
         int64_t dot = (int64_t)nx * cx + (int64_t)ny * cy + (int64_t)nz * cz;
         if (dot >= 0) continue;                          // facing away from camera
-        rnz[n] = (int16_t)nz;
-        depth[n] = vz[t->a] + vz[t->b] + vz[t->c];
-        order[n++] = i;
-    }
-    for (int a = 1; a < n; a++) {                        // insertion sort, far to near
-        int oi = order[a]; int32_t d = depth[a]; int b = a - 1;
-        while (b >= 0 && depth[b] < d) { depth[b + 1] = depth[b]; order[b + 1] = order[b]; b--; }
-        depth[b + 1] = d; order[b + 1] = oi;
+        keep[n++] = i;
     }
 
-    // ---- fill
+    // ---- fill, depth-tested. No sort: see g3d_scene.
+    zb_clear();
     for (int k = 0; k < n; k++) {
-        const Tri *t = &m->t[order[k]];
-        // Lighting: run the model normal through the same rotation, take z. A unit
-        // normal is still a unit normal after rotating, so no normalizing, no square
-        // root — that's the whole reason the normal is stored in the data.
+        const Tri *t = &m->t[keep[k]];
         int32_t nx = t->nx, ny = t->ny, nz = t->nz;
         g3d_rot(&nx, &ny, &nz, ax, ay, az);
-        int shade = (-nz * 8) >> 15;                     // light comes from the camera
+        int shade = (-nz * 8) >> 15;
         if (shade < 0) shade = 0;
         if (shade > 7) shade = 7;
         int16_t p[6] = { sx[t->a], sy[t->a], sx[t->b], sy[t->b], sx[t->c], sy[t->c] };
-        poly_fill(p, 3, (uint8_t)(t->ci + shade));
+        uint32_t w[3] = { (uint32_t)(((int64_t)1 << 30) / (vz[t->a] > NEAR ? vz[t->a] : NEAR)),
+                          (uint32_t)(((int64_t)1 << 30) / (vz[t->b] > NEAR ? vz[t->b] : NEAR)),
+                          (uint32_t)(((int64_t)1 << 30) / (vz[t->c] > NEAR ? vz[t->c] : NEAR)) };
+        tri_fill_z(p, w, (uint8_t)(t->ci + shade));
     }
 }
 
@@ -130,7 +123,7 @@ const Mesh g_cube = { cube_v, 8, cube_t, 12 };
 
 static int32_t sv_x[MAXSV], sv_y[MAXSV], sv_z[MAXSV];
 static int16_t sv_sx[MAXSV], sv_sy[MAXSV];
-static struct { uint16_t a, b, c; uint8_t ci; int32_t depth; } st[MAXST];
+static struct { uint16_t a, b, c; uint8_t ci; } st[MAXST];
 
 void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz) {
     int nv = 0, nt = 0;
@@ -171,28 +164,22 @@ void g3d_scene(const Inst *inst, int ninst, int32_t camz, int rx, int ry, int rz
             if (shade < 0) shade = 0; else if (shade > 7) shade = 7;
             st[nt].a = (uint16_t)a; st[nt].b = (uint16_t)b; st[nt].c = (uint16_t)c;
             st[nt].ci = (uint8_t)(tr->ci + shade);
-            st[nt].depth = sv_z[a] + sv_z[b] + sv_z[c];
             nt++;
         }
     }
 
-    // Far to near, across every instance at once. Insertion sort: these scenes are
-    // hundreds of triangles and it costs a handful of lines. Bucket by depth if a scene
-    // ever gets big enough to care.
-    for (int i = 1; i < nt; i++) {
-        int j = i - 1;
-        while (j >= 0 && st[j].depth < st[i].depth) j--;
-        if (j != i - 1) {
-            __typeof__(st[0]) tmp = st[i];
-            for (int k = i; k > j + 1; k--) st[k] = st[k - 1];
-            st[j + 1] = tmp;
-        }
-    }
-
+    // No sort. A painter's algorithm sorted per triangle is a guess that usually agrees
+    // with a depth test — until two average depths cross mid-rotation, a far face paints
+    // over a near one, and it reads as the colours flickering. The depth buffer decides
+    // per pixel, so the order these are drawn in doesn't matter at all.
+    zb_clear();
     for (int i = 0; i < nt; i++) {
         int16_t p[6] = { sv_sx[st[i].a], sv_sy[st[i].a],
                          sv_sx[st[i].b], sv_sy[st[i].b],
                          sv_sx[st[i].c], sv_sy[st[i].c] };
-        poly_fill(p, 3, st[i].ci);
+        uint32_t w[3] = { (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].a] > NEAR ? sv_z[st[i].a] : NEAR)),
+                          (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].b] > NEAR ? sv_z[st[i].b] : NEAR)),
+                          (uint32_t)(((int64_t)1 << 30) / (sv_z[st[i].c] > NEAR ? sv_z[st[i].c] : NEAR)) };
+        tri_fill_z(p, w, st[i].ci);
     }
 }
