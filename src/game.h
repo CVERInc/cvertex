@@ -38,5 +38,6 @@ typedef struct {
 extern const Game game_vikings;
 extern const Game game_title;
 extern const Game game_forms;
+extern const Game game_forms3;
 
 #endif

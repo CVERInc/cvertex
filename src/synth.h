@@ -24,6 +24,6 @@ void synth_init(void);
 void synth_note(int ch, int instr, int midi, int vel);  // triggered by the game thread
 void synth_off(int ch);
 void synth_render(int16_t *out, int frames);            // called by the audio thread
-void music_start(void);
+void music_start(void);   // the tracker's own demo tune — a game must ask for it
 
 #endif

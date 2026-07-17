@@ -127,7 +127,7 @@ int main(int argc, char **argv) {
     // same run, so a question like "does a flat shape fit through that gap" gets an
     // answer instead of an opinion. It's also, exactly, a replay.
     const char *keys = 0;
-    static const Game *const games[] = { &game_vikings, &game_title, &game_forms };
+    static const Game *const games[] = { &game_vikings, &game_title, &game_forms, &game_forms3 };
     #define NGAMES (int)(sizeof games / sizeof games[0])
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
@@ -278,7 +278,10 @@ int main(int argc, char **argv) {
 
     synth_init();
     audio_start();
-    music_start();
+    // 🔴 No music_start() here. The synth is a capability; a song is content, and the
+    // platform layer starting one meant the engine had an opinion about what you'd hear —
+    // the same mistake as an engine that knows what a jump is. A game that wants music
+    // starts it.
 
     // Fixed timestep. The sim always consumes a fixed dt, decoupled from wall-clock time → determinism.
     mach_timebase_info_data_t tb; mach_timebase_info(&tb);

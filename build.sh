@@ -4,7 +4,7 @@ set -e
 OUT=${OUT:-cvertex}
 clang -std=c11 -Os -fno-stack-protector -fomit-frame-pointer \
   -ffunction-sections -fdata-sections -Isrc \
-  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/mac.c games/vikings.c games/title.c games/forms.c \
+  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/mac.c games/vikings.c games/title.c games/forms.c games/forms3.c \
   -framework Cocoa -framework CoreGraphics -framework AudioToolbox \
   -Wl,-dead_strip
 strip -x "$OUT"
