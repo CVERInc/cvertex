@@ -14,6 +14,7 @@
 #include "core.h"
 #include "synth.h"
 #include "game.h"
+#include "games.gen.h"   // the cartridge roster, generated from games/*.c by tools/gen-games.sh
 
 // A game asked to be replaced. The platform owns this because switching games is what a
 // platform does; a game just points at the next one.
@@ -126,7 +127,7 @@ static void pump_events(id app, id mode) {
 // from.
 //
 // 🔴 y was hard-coded to 0 for weeks. Nothing on a keyboard could ever produce it, so the
-// menu's up/down did nothing and forms' morph key never once fired — while --keys set y
+// menu's up/down did nothing and a game's morph key never once fired — while --keys set y
 // happily, so every test passed. A test rig that can reach somewhere the player can't is
 // a test rig that verifies a game nobody is playing.
 static void read_input(Input in[2]) {
@@ -158,8 +159,8 @@ int main(int argc, char **argv) {
     // same run, so a question like "does a flat shape fit through that gap" gets an
     // answer instead of an opinion. It's also, exactly, a replay.
     const char *keys = 0;
-    static const Game *const games[] = { &game_title, &game_forms3, &game_forms, &game_vikings };
-    #define NGAMES (int)(sizeof games / sizeof games[0])
+    const Game *const *games = GEN_GAMES;   // whatever cartridges live in games/, in folder order
+    #define NGAMES GEN_NGAMES
     for (int a = 1; a < argc; a++) {
         if (!strcmp(argv[a], "--res") && a + 2 < argc) { rw = atoi(argv[a+1]); rh = atoi(argv[a+2]); a += 2; }
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
@@ -192,7 +193,7 @@ int main(int argc, char **argv) {
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
             printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
-            printf("  vikings: A/D/W and the arrow keys drive one character each. Esc quits.\n");
+            printf("  Controls vary by game: A/D/W + Space/E for one player, the arrows + Enter for a second. Esc quits.\n");
             return 0;
         }
         else if (argv[a][0] == 0x2D && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }

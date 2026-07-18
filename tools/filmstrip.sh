@@ -13,7 +13,7 @@
 # where to look is how you end up measuring the wrong part of the frame with great
 # precision.
 set -e
-GAME=${1:-title}
+GAME=${1:-menu}
 FROM=${2:-0}
 TO=${3:-840}
 STEP=${4:-60}

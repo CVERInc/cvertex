@@ -2,9 +2,10 @@
 # cvertex — build. Zero dependencies, just clang.
 set -e
 OUT=${OUT:-cvertex}
+sh tools/gen-games.sh          # scan games/*.c -> src/games.gen.h (the cartridge roster)
 clang -std=c11 -Os -fno-stack-protector -fomit-frame-pointer \
   -ffunction-sections -fdata-sections -Isrc \
-  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/mac.c games/vikings.c games/title.c games/forms.c games/forms3.c games/menu.c src/text.c \
+  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/text.c src/mac.c games/*.c \
   -framework Cocoa -framework CoreGraphics -framework AudioToolbox \
   -Wl,-dead_strip
 strip -x "$OUT"

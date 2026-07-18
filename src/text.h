@@ -5,7 +5,7 @@
 // earns a move to src/. Until then an engine with a font in it is an engine with an opinion
 // about letters."
 //
-// A game that ends asked. A run that ends has a distance, and a distance is a number, and a number has
+// A game asked. A run that ends has a distance, and a distance is a number, and a number has
 // to be said out loud — so the rule fires exactly as written, and the font moves.
 //
 // It's still not an opinion about letters: five columns of bits and a blitter. There's no

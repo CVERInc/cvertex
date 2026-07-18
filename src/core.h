@@ -41,8 +41,8 @@ void tables_init(void);       // called by sim_init; the synth depends on it too
 //
 // 🔴 x and y are the GROUND. This struct was born 2D — x, and a y that meant "up" — and a
 // 3D game needs two axes to stand on, so jump had to stop being one of them. A world you
-// can only cross in a straight line has doors you cannot reach: forms3's slot sits at z=0
-// and nothing could ever walk to it.
+// can only cross in a straight line has doors you cannot reach: a slot at z=0 sits off the
+// line, and nothing could ever walk to it.
 typedef struct {
     int8_t  x, y;      // ground plane. In 2D games y is unused; in a menu it's the list.
     uint8_t jump;      // space / return

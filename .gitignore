@@ -9,3 +9,5 @@ bare
 assets/local/
 src/local/
 cvertex.app
+cvertex.exe
+src/games.gen.h

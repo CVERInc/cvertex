@@ -39,12 +39,29 @@ typedef struct {
 // platform, not about menus. Set it and stop caring; you won't get another tick.
 extern const Game *g_switch_to;
 
-// Every game defines one of these; the platform layer picks between them.
-extern const Game game_vikings;
-extern const Game game_title;
-extern const Game game_forms;
-extern const Game game_forms3;
+// Every game defines a `const Game game_<name>` in its own games/<name>.c. The platform layer does
+// NOT name them here — tools/gen-games.sh scans games/*.c and writes the roster into games.gen.h, so
+// dropping a .c in the folder is all it takes to add a cartridge. The one exception is the shell
+// itself, which the platform reaches for by name as the default screen:
 extern const Game game_menu;
 void menu_populate(const Game *const *list, int n);
+
+// A single-player game reads one control scheme, but a player reaches for WASD or the arrows without
+// thinking. Merge both pads into one so either drives, with Space OR Enter as the action button —
+// so no single-player cartridge has to care which half of the keyboard the player picked.
+static inline Input input_1p(const Input in[2]) {
+    Input p;
+    p.x    = in[0].x ? in[0].x : in[1].x;
+    p.y    = in[0].y ? in[0].y : in[1].y;
+    p.jump = in[0].jump | in[1].jump;      // Space or Enter — the action button
+    p.act  = in[0].act  | in[1].act;
+    return p;
+}
+
+// 🔴 Any HUD a game paints at the top must clear this band. The window's title bar crowds the top
+// edge, so a score drawn at y=0 reads as jammed under the chrome (or hidden by it). Put top-left
+// HUD at hud_top() and below — never in the rows above it. Every cartridge follows this, so the
+// rule lives here and not in anyone's memory.
+static inline int hud_top(void) { return g_fbh * 8 / 100; }
 
 #endif
