@@ -328,7 +328,17 @@ int main(int argc, char **argv) {
 
         Input in[2]; read_input(in);
         g->tick(in);
-        if (g_switch_to) { g = g_switch_to; g_switch_to = 0; g->init(); memset(g_keys, 0, sizeof g_keys); continue; }
+        if (g_switch_to) {
+            // Silence first, then hand over. Stopping the music is the platform's job —
+            // otherwise whatever the last game was playing follows you into the next one,
+            // and every game would have to remember to shut the previous one up. Asking for
+            // music is the game's job, in init(), where a song is content like any other.
+            g = g_switch_to; g_switch_to = 0;
+            music_play(0, 0, 0, 0);
+            g->init();
+            memset(g_keys, 0, sizeof g_keys);
+            continue;
+        }
         g->audio();
         g->draw();
         MSG(void, BOOL)(view, SEL_("setNeedsDisplay:"), YES);

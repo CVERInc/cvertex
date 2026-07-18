@@ -5,60 +5,12 @@
 // can't be the one that chooses. The engine gained exactly one thing for this — a game may
 // ask to be replaced — and that's a fact about the platform, not about menus.
 //
-// The font lives here, not in the engine. Text is a capability every game eventually
-// wants, and the moment a second one asks, it earns a move to src/. Until then an engine
-// with a font in it is an engine with an opinion about letters.
+// The font used to live here, under a note saying it would move to src/ the moment a
+// second game wanted text. The runner wanted text. It moved.
 #include "core.h"
 #include "game.h"
 #include "synth.h"
-#include <string.h>
-
-// 5x7, one byte per column, bit 0 = top. Only what the names need; adding a glyph is
-// adding five numbers.
-static const struct { char c; uint8_t col[5]; } GLYPH[] = {
-    { 'A', { 0x7E,0x11,0x11,0x11,0x7E } }, { 'B', { 0x7F,0x49,0x49,0x49,0x36 } },
-    { 'C', { 0x3E,0x41,0x41,0x41,0x22 } }, { 'D', { 0x7F,0x41,0x41,0x22,0x1C } },
-    { 'E', { 0x7F,0x49,0x49,0x49,0x41 } }, { 'F', { 0x7F,0x09,0x09,0x09,0x01 } },
-    { 'G', { 0x3E,0x41,0x49,0x49,0x7A } }, { 'H', { 0x7F,0x08,0x08,0x08,0x7F } },
-    { 'I', { 0x00,0x41,0x7F,0x41,0x00 } }, { 'J', { 0x20,0x40,0x41,0x3F,0x01 } },
-    { 'K', { 0x7F,0x08,0x14,0x22,0x41 } }, { 'L', { 0x7F,0x40,0x40,0x40,0x40 } },
-    { 'M', { 0x7F,0x02,0x0C,0x02,0x7F } }, { 'N', { 0x7F,0x04,0x08,0x10,0x7F } },
-    { 'O', { 0x3E,0x41,0x41,0x41,0x3E } }, { 'P', { 0x7F,0x09,0x09,0x09,0x06 } },
-    { 'Q', { 0x3E,0x41,0x51,0x21,0x5E } }, { 'R', { 0x7F,0x09,0x19,0x29,0x46 } },
-    { 'S', { 0x46,0x49,0x49,0x49,0x31 } }, { 'T', { 0x01,0x01,0x7F,0x01,0x01 } },
-    { 'U', { 0x3F,0x40,0x40,0x40,0x3F } }, { 'V', { 0x1F,0x20,0x40,0x20,0x1F } },
-    { 'W', { 0x7F,0x20,0x18,0x20,0x7F } }, { 'X', { 0x63,0x14,0x08,0x14,0x63 } },
-    { 'Y', { 0x03,0x04,0x78,0x04,0x03 } }, { 'Z', { 0x61,0x51,0x49,0x45,0x43 } },
-    { '0', { 0x3E,0x51,0x49,0x45,0x3E } }, { '1', { 0x00,0x42,0x7F,0x40,0x00 } },
-    { '2', { 0x42,0x61,0x51,0x49,0x46 } }, { '3', { 0x21,0x41,0x45,0x4B,0x31 } },
-    { '4', { 0x18,0x14,0x12,0x7F,0x10 } }, { '5', { 0x27,0x45,0x45,0x45,0x39 } },
-    { '6', { 0x3C,0x4A,0x49,0x49,0x30 } }, { '7', { 0x01,0x71,0x09,0x05,0x03 } },
-    { '8', { 0x36,0x49,0x49,0x49,0x36 } }, { '9', { 0x06,0x49,0x49,0x29,0x1E } },
-    { '-', { 0x08,0x08,0x08,0x08,0x08 } }, { '.', { 0x00,0x60,0x60,0x00,0x00 } },
-};
-#define NGLYPH (int)(sizeof GLYPH / sizeof GLYPH[0])
-
-static void put(int x, int y, int s, char c, uint8_t ci) {
-    if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
-    for (int g = 0; g < NGLYPH; g++) {
-        if (GLYPH[g].c != c) continue;
-        for (int col = 0; col < 5; col++)
-            for (int row = 0; row < 7; row++)
-                if (GLYPH[g].col[col] & (1 << row))
-                    for (int dy = 0; dy < s; dy++)
-                        for (int dx = 0; dx < s; dx++) {
-                            int px = x + col * s + dx, py = y + row * s + dy;
-                            if (px >= 0 && px < g_fbw && py >= 0 && py < g_fbh)
-                                g_fb[py * g_fbw + px] = ci;
-                        }
-        return;
-    }
-}
-
-static void text(int x, int y, int s, const char *str, uint8_t ci) {
-    for (const char *p = str; *p; p++, x += 6 * s) put(x, y, s, *p, ci);
-}
-static int width(const char *s, int sc) { return (int)strlen(s) * 6 * sc - sc; }
+#include "text.h"
 
 // ---- the menu ---------------------------------------------------------------
 
@@ -100,7 +52,7 @@ static void draw(void) {
     if (s < 1) s = 1;
     int cx = g_fbw / 2;
 
-    text(cx - width("CVERTEX", s * 3) / 2, g_fbh / 6, s * 3, "CVERTEX", 4);
+    text_draw(cx - text_width("CVERTEX", s * 3) / 2, g_fbh / 6, s * 3, "CVERTEX", 4);
 
     int top = g_fbh / 2 - g_n * 12 * s / 2;
     for (int i = 0; i < g_n; i++) {
@@ -111,13 +63,13 @@ static void draw(void) {
                     if (px >= 0 && px < g_fbw && py >= 0 && py < g_fbh)
                         g_fb[py * g_fbw + px] = 5;
             // A caret that blinks, so a still screenshot still says which one is live.
-            if ((g_frame / 20) & 1) put(cx - 52 * s, y, s, '-', 3);
+            if ((g_frame / 20) & 1) text_put(cx - 52 * s, y, s, '-', 3);
         }
-        text(cx - width(g_list[i]->name, s) / 2, y, s,
+        text_draw(cx - text_width(g_list[i]->name, s) / 2, y, s,
              g_list[i]->name, (uint8_t)(i == g_sel ? 2 : 1));
     }
 
-    text(cx - width("ARROWS OR WASD   SPACE TO START   ESC QUITS", s) / 2,
+    text_draw(cx - text_width("ARROWS OR WASD   SPACE TO START   ESC QUITS", s) / 2,
          g_fbh - g_fbh / 6, s, "ARROWS OR WASD   SPACE TO START   ESC QUITS", 1);
 }
 

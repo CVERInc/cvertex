@@ -14,11 +14,11 @@
 ## What & why
 
 There is no engine runtime here, no textures, no sampled audio, no asset loader and no
-parser. What's left is geometry, a palette, and arithmetic — which turns out to be enough
+parser. What's left is geometry, a palette, and arithmetic â which turns out to be enough
 for a shaded, rotating 3D world with a soundtrack.
 
 Every technique in it is 1994's: palette indices, scanline fills, fixed point, a
-painter's algorithm. Not one bit is new. That was never what stopped 1994 — a SNES needed
+painter's algorithm. Not one bit is new. That was never what stopped 1994 â a SNES needed
 an extra chip in the cartridge to draw wireframes at all, and Star Fox ran at fifteen
 frames a second because of the silicon, not because anybody was short of ideas.
 
@@ -32,11 +32,11 @@ The silicon caught up. So the same arithmetic, on one core with no GPU:
 | **3840x2160** | **540 fps** |
 
 A 486 could not fill 8.3M pixels. This does it 540 times a second with nine frames of
-headroom left over — running code its authors would have recognised on sight.
+headroom left over â running code its authors would have recognised on sight.
 
 What that buys, beyond the number: an engine small enough to hold in your head. You can
 read all of it, so you can trust all of it, and you can change any of it without
-wondering what else knows about it. It isn't a big claim — this is all of it:
+wondering what else knows about it. It isn't a big claim â this is all of it:
 
 | | |
 |---|---|
@@ -44,6 +44,7 @@ wondering what else knows about it. It isn't a big claim — this is all of it:
 | `src/g3d.c` | the fixed-point 3D pipeline |
 | `src/shape.c` | vector art: extrusion, turnarounds |
 | `src/synth.c` | FM synth, oscillators, tracker |
+| `src/text.c` | a bitmap font, drawn straight to the framebuffer |
 | `src/mac.c` | the macOS platform layer |
 | `src/game.h` | the line between the engine and a game |
 | `games/*.c` | the games, including the menu that picks between them |
@@ -57,12 +58,13 @@ baked artwork outweighs all the code. Neither is the engine.
 
 - **Palette-indexed software rendering.** One byte per pixel, 256 colours, no GPU.
 - **Fixed-point 3D.** Not one float in the pipeline. Deterministic on every machine.
-- **Synthesized audio.** 2-op FM plus classic waveforms. No wav, no ogg, no decoder.
-- **Deterministic simulation.** Same inputs, same frame, forever — at any resolution,
+- **Synthesized audio.** 2-op FM plus classic waveforms, sequenced by a tiny tracker into music and effects. No wav, no ogg, no decoder.
+- **Deterministic simulation.** Same inputs, same frame, forever â at any resolution,
   because gameplay lives in a virtual space the display can't reach. Replays and lockstep
   multiplayer come free.
 - **Vector characters.** Drawings in, polygons out, extruded into the 3D world. Turn to
   the drawn view nearest the facing, then keep rotating the rest of the way.
+- **Bitmap text.** A pixel font drawn into the same framebuffer — score, menus, numbers — with no font files, no glyph atlas.
 - **Chunky or sharp is a number.** 640x360 scaled up is a 1994 pixel grid; the display's
   own resolution is the same polygons, sharp. Same art, same binary.
 - **Local co-op from day one.** The simulation never learns where input came from.
@@ -76,7 +78,7 @@ tools/bundle.sh && open cvertex.app   # ...or the same thing, double-clickable
 ```
 
 In a game: A/D/W drives one character, the arrow keys drive the other. Every build prints
-its size — the number is worth watching, and watching it is free.
+its size â the number is worth watching, and watching it is free.
 
 ```sh
 ./cvertex --res 1920 1080   # any resolution; the art is vector
@@ -90,8 +92,8 @@ its size — the number is worth watching, and watching it is free.
 
 ### The palette is the foundation
 
-Ordinary pixels store *what colour is here* — R235 G71 B71, four bytes. Palette
-pixels store *which number is here* — one byte, and a 256-entry table says what
+Ordinary pixels store *what colour is here* â R235 G71 B71, four bytes. Palette
+pixels store *which number is here* â one byte, and a 256-entry table says what
 each number means.
 
 Saving three bytes a pixel is the small win. The real one is that you can change
@@ -102,25 +104,25 @@ what number 2 *means* without touching a single pixel:
 | Fade out | Walk all 256 entries toward black | 0 |
 | Flash on hit | Set that material's entry white for a frame | 0 |
 | Dusk lighting | Bias the whole table orange | 0 |
-| Shade a 3D face | Give each material 8 consecutive entries — one hue, eight brightnesses — and pick one by the surface normal | 0 |
+| Shade a 3D face | Give each material 8 consecutive entries â one hue, eight brightnesses â and pick one by the surface normal | 0 |
 
 Light and effects aren't computed, they're a 1 KB table you edit. That is why the 3D
 pipeline is 1,316 bytes: it doesn't calculate light, it looks it up.
 
-It also decides the art the engine wants — flat fills, hard edges, no gradients. A
+It also decides the art the engine wants â flat fills, hard edges, no gradients. A
 gradient puts hundreds of near-identical skin tones on one face; 256 slots can't hold
 them and wouldn't gain anything if they could. The look and the implementation are the
 same decision, which is why the look is coherent rather than applied.
 
 ### 3D is a software Cx4
 
-In 1994 Rockman X2 rendered wireframes with a Capcom Cx4 — a 20 MHz fixed-point
+In 1994 Rockman X2 rendered wireframes with a Capcom Cx4 â a 20 MHz fixed-point
 DSP whose instruction set literally included `Draw wireframe` and
 `Transform Lines`. This is that, in software.
 
 Rotation reads the same sine table the synth uses. Projection is one divide.
 Triangles go through the same `poly_fill` the 2D path uses. Face normals live in
-the model, because a unit normal stays a unit normal through a rotation — so
+the model, because a unit normal stays a unit normal through a rotation â so
 lighting never normalizes and never takes a square root.
 
 Culling and lighting share one source of truth: the model normal. Flip a
@@ -129,10 +131,10 @@ and fix in your modelling tool.
 
 ### Sound is arithmetic, not a file
 
-2-op FM (a modulator offsetting a carrier's phase — the AdLib/OPL2 voice) plus
+2-op FM (a modulator offsetting a carrier's phase â the AdLib/OPL2 voice) plus
 square, triangle, saw and LFSR noise, each with an ADSR envelope.
 
-An instrument is 12 bytes. The demo song is a 32×4 table — 64 bytes. For scale,
+An instrument is 12 bytes. The demo song is a 32Ã4 table â 64 bytes. For scale,
 a three-minute MP3 is roughly two floppies.
 
 The simulation only emits events; the platform layer turns those into notes. The
@@ -143,7 +145,7 @@ determinism.
 
 Give me a window. Give me memory that reaches the screen. What key is down. What
 time is it. Should I stop. The macOS layer is plain C calling the Objective-C
-runtime directly — no Objective-C compiler involved.
+runtime directly â no Objective-C compiler involved.
 
 Frameworks are dylibs on macOS, so linking one costs about 72 bytes. Audio is
 effectively free.
@@ -151,20 +153,20 @@ effectively free.
 ### Assets are baked, not loaded
 
 `tools/obj2mesh` turns any `.obj` into a `const` C array at build time; `tools/svg2poly`
-does the same for vector art. No loader, no file format, no I/O, no error handling — and
+does the same for vector art. No loader, no file format, no I/O, no error handling â and
 `const` data lives in a `__TEXT` page that was already there.
 
 The engine never learns what SVG is. SVG is an authoring format: the full spec is a
 monster, and an engine that grew one would stop being readable. Curves flatten and colours
 cluster at build time; the engine receives points and a palette index.
 
-Vertex normals in an `.obj` are ignored — flat shading wants face normals, so they come
+Vertex normals in an `.obj` are ignored â flat shading wants face normals, so they come
 from geometry, which also means any tool's output works.
 
 ### Drawings become characters
 
 A character is drawn from several angles, traced to polygons, and extruded: the
-silhouette grows walls, the artwork stays flat on the front. Nothing is triangulated —
+silhouette grows walls, the artwork stays flat on the front. Nothing is triangulated â
 `poly_fill` only ever wanted screen coordinates and never cared where they came from, so
 shape points ride the same transform as meshes.
 
@@ -175,9 +177,9 @@ costs accuracy, not correctness.
 
 Three things about this are load-bearing, and each was a bug first:
 
-- **Every view carries its own angle.** Assuming even spacing put the front view at 180°.
+- **Every view carries its own angle.** Assuming even spacing put the front view at 180Â°.
   An artist draws the angles a character needs, not the angles a formula wants. Which
-  angle reads as screen-right is a property of the art too — read the sheet.
+  angle reads as screen-right is a property of the art too â read the sheet.
 - **Mirroring is opt-in, never automatic.** Reflecting one half is free and it is wrong
   for any design that isn't symmetric: a scar, a satchel, a parting all jump sides, and it
   looks completely normal until someone notices. Bytes are the cheapest thing here.
@@ -186,7 +188,7 @@ Three things about this are load-bearing, and each was a bug first:
   A tracer can't tell those apart, so every blended edge pixel became a real, thin,
   spurious fill. Snapping the source to its own flat colours first (nearest in CIE76 Lab)
   took it to 14. And trace on a key colour, never on transparency: transparent composites
-  to white, white artwork merges with it, and the tracer discards it as background — a
+  to white, white artwork merges with it, and the tracer discards it as background â a
   white-haired character arrives with a hole where her hair was, which still looks right
   on a white page because you are seeing the page through her.
 
@@ -195,9 +197,9 @@ Three things about this are load-bearing, and each was a bug first:
 Small isn't an accident, and it isn't free. Two rules keep it.
 
 **Static variables are zero-initialized; assign at runtime.** A non-zero
-initializer creates `__data`, and macOS aligns segments to 16 KB — so four bytes
+initializer creates `__data`, and macOS aligns segments to 16 KB â so four bytes
 of initial value drag 16,384 bytes into the file. Zero-initialized data lives in
-`__bss` and costs nothing on disk. The framebuffer is free at any size — up to 4K.
+`__bss` and costs nothing on disk. The framebuffer is free at any size â up to 4K.
 
 **Measure, don't guess.** Every build prints its size. The first synth clipped
 through its whole range and sounded merely "a bit dirty"; the meter said peak
@@ -225,4 +227,4 @@ tools/        build-time asset converters
 
 ## License
 
-MIT © CVER Inc.
+MIT Â© CVER Inc.

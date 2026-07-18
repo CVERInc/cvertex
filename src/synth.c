@@ -40,10 +40,17 @@ static uint32_t note_step(int midi) {
 }
 
 void synth_note(int ch, int instr, int midi, int vel) {
-    Voice *v = &g_v[ch & (NCHAN - 1)];
-    v->instr = instr & (NINSTR - 1);
+    // 🔴 A bound, not a mask. `ch & (NCHAN - 1)` is only a modulo while NCHAN is a power of
+    // two — it was 4, it is 6, and &5 quietly sends channel 2 to voice 0 and channel 3 to
+    // voice 1. The song would have come out mangled and I'd have blamed the song.
+    if (ch < 0 || ch >= NCHAN) return;
+    Voice *v = &g_v[ch];
+    v->instr = instr & (NINSTR - 1);   // NINSTR is 8 and the mask is honest there
     v->step = note_step(midi);
     v->phase = v->mphase = 0;
+    // Clamped here so that no game can ever mix its way past int16. See VEL_MAX.
+    if (vel > VEL_MAX) vel = VEL_MAX;
+    if (vel < 0) vel = 0;
     v->vel = vel;
     v->stage = ENV_A;
     v->env = 0;
@@ -52,7 +59,8 @@ void synth_note(int ch, int instr, int midi, int vel) {
 }
 
 void synth_off(int ch) {
-    Voice *v = &g_v[ch & (NCHAN - 1)];
+    if (ch < 0 || ch >= NCHAN) return;      // a bound, not a mask — see synth_note
+    Voice *v = &g_v[ch];
     if (v->stage == ENV_OFF) return;
     v->stage = ENV_R;
     Instr *in = &g_instr[v->instr];
@@ -73,12 +81,11 @@ static int32_t osc(Voice *v, Instr *in, uint32_t ph) {
 }
 
 static void music_tick(void);
-static int g_tickcount = 0;
-#define TICK_SAMPLES (SR / 8)   // 8 tracker rows per second (feels like 125 BPM)
+static int g_tickcount, g_ticklen;   // the tracker's clock; zero-init, so __bss
 
 void synth_render(int16_t *out, int frames) {
     for (int i = 0; i < frames; i++) {
-        if (--g_tickcount <= 0) { music_tick(); g_tickcount = TICK_SAMPLES; }
+        if (g_ticklen && --g_tickcount <= 0) { music_tick(); g_tickcount = g_ticklen; }
 
         int32_t mix = 0;
         for (int c = 0; c < NCHAN; c++) {
@@ -120,32 +127,28 @@ void synth_render(int16_t *out, int frames) {
 }
 
 // ---- tiny tracker ---------------------------------------------------
-// A song is a table. This is the "music file" — the whole song below is 64 bytes.
-#define ROWS 32
-static const uint8_t g_song[ROWS][NCHAN] = {
-//  lead bass perc pad      (0 = no change, otherwise = MIDI pitch)
-    { 76,  40,  60,  64 }, { 0, 0, 0, 0 }, { 79, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 83,  40,  60,  0 },  { 0, 0, 0, 0 }, { 79, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 81,  45,  60,  69 }, { 0, 0, 0, 0 }, { 78, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 74,  45,  60,  0 },  { 0, 0, 0, 0 }, { 78, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 76,  38,  60,  62 }, { 0, 0, 0, 0 }, { 79, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 84,  38,  60,  0 },  { 0, 0, 0, 0 }, { 83, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 81,  43,  60,  67 }, { 0, 0, 0, 0 }, { 76, 0, 60, 0 }, { 0, 0, 0, 0 },
-    { 79,  43,  60,  0 },  { 0, 0, 0, 0 }, { 0,  0, 60, 0 }, { 0, 0, 0, 0 },
-};
-// 🔴 These two must never get a non-zero initializer: a non-zero initializer
-// creates __data, and that drags a whole 16 KB page into the file. Zero-init lives
-// in __bss (zerofill, costs nothing on disk). Initial values are always assigned at runtime.
-static int g_row, g_playing;
-static const uint8_t g_rowinstr[NCHAN] = { 1, 2, 3, 6 };  // which instrument each channel uses
+// A song is a table, and the table belongs to whoever is playing it. This holds a pointer
+// and a length; the notes live in the game.
+//
+// 🔴 None of these may get a non-zero initializer: that creates __data, and macOS aligns
+// segments to 16 KB, so four bytes of initial value drag a whole page into the file.
+// Zero-init lives in __bss, which is zerofill and costs nothing on disk.
+static const uint8_t *g_song, *g_rowinstr;
+static int g_rows, g_row, g_playing;
 
-void music_start(void) { g_row = ROWS - 1; g_playing = 1; }
+void music_play(const uint8_t *song, int rows, const uint8_t *rowinstr, int rps) {
+    if (!song || rows <= 0 || rps <= 0) { g_playing = 0; return; }
+    g_song = song; g_rows = rows; g_rowinstr = rowinstr;
+    g_ticklen = SR / rps;
+    g_tickcount = 1;
+    g_row = rows - 1; g_playing = 1;
+}
 
 static void music_tick(void) {
     if (!g_playing) return;
-    g_row = (g_row + 1) % ROWS;
-    for (int c = 0; c < NCHAN - 1; c++) {   // last channel is reserved for sound effects
-        uint8_t n = g_song[g_row][c];
-        if (n) synth_note(c, g_rowinstr[c], n, 200);
+    g_row = (g_row + 1) % g_rows;
+    for (int c = 0; c < NCHAN - 1; c++) {   // the last channel belongs to sound effects
+        uint8_t n = g_song[g_row * NCHAN + c];
+        if (n) synth_note(c, g_rowinstr[c], n, VEL_MAX);
     }
 }
