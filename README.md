@@ -97,9 +97,11 @@ sh build-win.sh            # produces cvertex.exe — double-click to play
 
 The menu opens: arrows or WASD to browse the shelf, Space to start, Esc to quit.
 
-> The Linux layer is new: it compiles clean and its headless simulation is **byte-identical** to
-> the macOS and Windows builds, but its interactive window and audio haven't been run on a real
-> Linux box yet. If something's off there, that's a very welcome first pull request.
+> The Linux layer is new but well-exercised: it compiles native on real Linux (x86_64 **and**
+> aarch64), and its headless simulation comes out **byte-identical across both architectures** and
+> to the macOS/Windows builds — the same inputs, the same checksum, so the port never touches the
+> games. The one piece still unconfirmed is the interactive desktop window (colours, keyboard,
+> audio); if something's off there, that's a very welcome first pull request.
 
 Controls vary by game, but the pattern holds: A/D/W + Space is one player, the arrow keys + Enter
 are a second where a game wants two. Every build prints its size — the number is worth watching,
@@ -269,8 +271,9 @@ through its whole range and sounded merely "a bit dirty"; the meter said peak
 Early. It runs, and the shape of it is settled.
 
 - macOS, Windows, and Linux — a platform layer each (Cocoa, Win32, X11+ALSA), no third-party
-  deps. The Linux layer (`build-linux.sh`) compiles clean and its headless sim matches the other
-  two byte-for-byte; its interactive window hasn't been run on real hardware yet.
+  deps. The Linux layer (`build-linux.sh`) is compiled and run on real Linux (x86_64 and aarch64),
+  its headless sim byte-identical across both; only the interactive desktop window is still to be
+  confirmed.
 - The engine ships with no artwork. `tools/svg2poly` bakes a character in; without one
   it draws placeholder polygons.
 
