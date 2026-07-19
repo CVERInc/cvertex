@@ -107,6 +107,13 @@ static void read_input(Input in[2]) {
 
 int main(int argc, char **argv) {
     g_running = 1;
+    // Built with -mwindows, so a double-click opens no console — just the game window. But if this
+    // WAS launched from a terminal, attach to it so --headless and --help still print there (the
+    // cross-platform determinism check needs its stdout). No parent console = nothing attaches.
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
     int rw = 640, rh = 360;
     const char *runmode = 0; int modearg = 0;
     const char *keys = 0;

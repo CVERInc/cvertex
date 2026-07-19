@@ -5,7 +5,9 @@
 set -e
 OUT=${OUT:-cvertex.exe}
 sh tools/gen-games.sh          # scan games/*.c -> src/games.gen.h (the cartridge roster)
-zig cc -target x86_64-windows-gnu -std=c11 -O2 -Isrc \
+zig cc -target x86_64-windows-gnu -std=c11 -O2 -Isrc -Wl,--subsystem,windows \
   -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/text.c src/win.c games/*.c \
   -lgdi32 -lwinmm -luser32
-echo "$OUT — copy to a Windows machine and run it"
+# -mwindows = the GUI subsystem: double-clicking opens just the game window, no black console.
+# (win.c still AttachConsole's to a terminal if it was launched from one, so --headless prints.)
+echo "$OUT — double-click to play"
