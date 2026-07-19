@@ -140,6 +140,14 @@ const Game game_pong = { "pong", init, tick, audio, draw, checksum };
 ./build.sh && ./cvertex --game pong
 ```
 
+> ⚠️ **A cartridge appears at BUILD time, not at runtime.** After you add or change a `.c` you
+> **must rebuild** — `./build.sh` — because the engine is compiled, not a hot-loader. Opening an
+> already-built `cvertex` will not show your new game; always `./build.sh && ./cvertex`.
+>
+> Name the struct **`game_<yourname>`** to match its `"<yourname>"` string (e.g. `game_pong` /
+> `"pong"`). A generic name like `game_my_game` works alone but collides at link time the moment a
+> second contributor leaves theirs the same — so make it yours.
+
 `build.sh` runs `tools/gen-games.sh`, which scans `games/*.c` for each `const Game game_X`
 and writes the roster into `src/games.gen.h`. It is an emulator reading its ROM folder,
 done at build time — the `.c` is the ROM, and building is the cartridge going in. The one
