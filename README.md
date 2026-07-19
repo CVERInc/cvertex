@@ -157,6 +157,11 @@ The whole toolchain is a C compiler. `./build.sh` uses the system `clang`; `./bu
 cross-compiles a Windows `.exe` with [zig](https://ziglang.org) (`brew install zig`). If you
 can compile a C file, you can add a cartridge.
 
+For the full contract — the runtime-resolution coordinate model, the determinism rule, input,
+sound, and a checklist — see **[docs/AUTHORING.md](docs/AUTHORING.md)**. It ends with a system
+prompt you can paste into an AI assistant so it writes cartridges that fit the engine instead of
+guessing at its API.
+
 ## How it works
 
 ### The palette is the foundation
