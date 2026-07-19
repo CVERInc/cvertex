@@ -46,6 +46,7 @@ wondering what else knows about it. It isn't a big claim — this is all of it:
 | `src/synth.c` | FM synth, oscillators, tracker |
 | `src/mac.c` | the macOS platform layer |
 | `src/win.c` | the Windows platform layer |
+| `src/lnx.c` | the Linux platform layer |
 | `src/game.h` | the line between the engine and a game |
 | `games/*.c` | one cartridge each; the folder is the roster |
 
@@ -73,14 +74,36 @@ baked artwork outweighs all the code. Neither is the engine.
 
 ## Quick start
 
+The whole toolchain is a C compiler. Pick your platform (A–Z, no favourites):
+
+**Linux** — X11 + ALSA (`sudo apt install gcc libx11-dev libasound2-dev`, or your distro's equivalent):
+
 ```sh
-./build.sh && ./cvertex          # opens a menu; arrows to pick, W to start, Esc quits
+sh build-linux.sh && ./cvertex
+```
+
+**macOS** — clang (`xcode-select --install`):
+
+```sh
+./build.sh && ./cvertex
 tools/bundle.sh && open cvertex.app   # ...or the same thing, double-clickable
 ```
 
-Controls vary by game, but the pattern holds: A/D/W + Space/E is one player, the arrow keys +
-Enter are a second where a game wants two. Every build prints its size — the number is worth
-watching, and watching it is free.
+**Windows** — [zig](https://ziglang.org) and Git for Windows, then in Git Bash:
+
+```sh
+sh build-win.sh            # produces cvertex.exe — double-click to play
+```
+
+The menu opens: arrows or WASD to browse the shelf, Space to start, Esc to quit.
+
+> The Linux layer is new: it compiles clean and its headless simulation is **byte-identical** to
+> the macOS and Windows builds, but its interactive window and audio haven't been run on a real
+> Linux box yet. If something's off there, that's a very welcome first pull request.
+
+Controls vary by game, but the pattern holds: A/D/W + Space is one player, the arrow keys + Enter
+are a second where a game wants two. Every build prints its size — the number is worth watching,
+and watching it is free.
 
 ```sh
 ./cvertex --res 1920 1080   # any resolution; the art is vector
@@ -245,8 +268,9 @@ through its whole range and sounded merely "a bit dirty"; the meter said peak
 
 Early. It runs, and the shape of it is settled.
 
-- macOS and Windows. `build-win.sh` cross-compiles the `.exe` with zig; the Linux platform
-  layer isn't written yet.
+- macOS, Windows, and Linux — a platform layer each (Cocoa, Win32, X11+ALSA), no third-party
+  deps. The Linux layer (`build-linux.sh`) compiles clean and its headless sim matches the other
+  two byte-for-byte; its interactive window hasn't been run on real hardware yet.
 - The engine ships with no artwork. `tools/svg2poly` bakes a character in; without one
   it draws placeholder polygons.
 
@@ -258,8 +282,9 @@ Early. It runs, and the shape of it is settled.
 src/core.c    framebuffer, polygon rasterizer, deterministic sim, sine table
 src/g3d.c     fixed-point 3D pipeline
 src/synth.c   FM synth, oscillators, tracker
-src/mac.c     macOS platform layer
+src/mac.c     macOS platform layer (Cocoa + CoreAudio)
 src/win.c     Windows platform layer (Win32 + GDI + waveOut)
+src/lnx.c     Linux platform layer (X11 + ALSA)
 games/*.c     one cartridge each; the folder is the roster
 tools/        build-time asset converters; gen-games.sh writes the roster
 ```
