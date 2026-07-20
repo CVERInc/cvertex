@@ -10,7 +10,7 @@
 // something alive instead of a camera doing arithmetic.
 //
 // Every tile is the same box, in three colours (two checker shades, one hazard amber):
-// one shared vertex buffer, three baked triangle sets, the same trick title.c uses for
+// one shared vertex buffer, three baked triangle sets, the same trick the console shell uses for
 // 27 cubies that only ever differ in colour. A tile that's a GAP is not drawn at all —
 // missing geometry is the honest way to say "there is no floor here," and the rails
 // either side of the ribbon stop exactly where the gap starts, so the void is never

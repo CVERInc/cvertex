@@ -19,6 +19,8 @@
 #include "core.h"
 #include "synth.h"
 #include "game.h"
+#include "g3d.h"
+#include "net.h"          // deterministic lockstep networking (BSD sockets, shared with mac.c)
 #include "games.gen.h"   // the cartridge roster, generated from games/*.c by tools/gen-games.sh
 
 const Game *g_switch_to;
@@ -26,7 +28,8 @@ const Game *g_switch_to;
 // ---- our own compact key state. X keysyms are large sparse values, so we fold the handful we care
 // about into a small dense array the way win.c indexes by virtual-key code.
 enum { K_A, K_D, K_W, K_S, K_SPACE, K_E,
-       K_LEFT, K_RIGHT, K_UP, K_DOWN, K_RETURN, K_RSHIFT, K_SLASH, NKEYS };
+       K_LEFT, K_RIGHT, K_UP, K_DOWN, K_RETURN, K_RSHIFT, K_SLASH,
+       K_TAB, K_ESCAPE, NKEYS };
 static uint8_t g_keys[NKEYS];
 static int     g_running;
 
@@ -116,6 +119,8 @@ static int keyidx(KeySym ks) {
         case XK_Return: case XK_KP_Enter: return K_RETURN;
         case XK_Shift_R:      return K_RSHIFT;
         case XK_slash:        return K_SLASH;
+        case XK_Tab:          return K_TAB;
+        case XK_Escape:       return K_ESCAPE;
         default:              return -1;
     }
 }
@@ -123,11 +128,16 @@ static int keyidx(KeySym ks) {
 // Keyboard -> input for two characters. Character A reads WASD + Space + E; character B reads the
 // arrows + Enter + Right-Shift or '/'. Same local co-op mac.c and win.c establish; the sim never asks.
 static void read_input(Input in[2]) {
-    in[0] = (Input){ (int8_t)(g_keys[K_D] - g_keys[K_A]),
-                     (int8_t)(g_keys[K_W] - g_keys[K_S]),
+    // Dual-stick, mirroring mac.c: WASD is P1's LEFT stick (W/S forward-back, A/D STRAFE); the
+    // arrows are P1's RIGHT stick (LOOK: left/right yaw, up/down pitch) AND double as P2's move.
+    in[0] = (Input){ (int8_t)(g_keys[K_D] - g_keys[K_A]),           // strafe
+                     (int8_t)(g_keys[K_W] - g_keys[K_S]),           // forward/back
+                     (int8_t)(g_keys[K_RIGHT] - g_keys[K_LEFT]),    // look yaw
+                     (int8_t)(g_keys[K_UP] - g_keys[K_DOWN]),       // look pitch
                      g_keys[K_SPACE], g_keys[K_E] };
-    in[1] = (Input){ (int8_t)(g_keys[K_RIGHT] - g_keys[K_LEFT]),
-                     (int8_t)(g_keys[K_UP] - g_keys[K_DOWN]),
+    in[1] = (Input){ (int8_t)(g_keys[K_RIGHT] - g_keys[K_LEFT]),    // P2 move x
+                     (int8_t)(g_keys[K_UP] - g_keys[K_DOWN]),       // P2 move y
+                     0, 0,                                          // P2 has no look stick on the keys
                      g_keys[K_RETURN],
                      (uint8_t)(g_keys[K_RSHIFT] | g_keys[K_SLASH]) };
 }
@@ -137,9 +147,17 @@ static void handle_event(XEvent *e) {
         case KeyPress: case KeyRelease: {
             KeySym ks = XLookupKeysym(&e->xkey, 0);
             int down = (e->type == KeyPress);
-            if (ks == XK_Escape) { if (down) g_running = 0; return; }   // Esc quits
             int idx = keyidx(ks);
-            if (idx >= 0) g_keys[idx] = (uint8_t)down;
+            if (idx >= 0) {
+                // Edge, mirroring mac.c/win.c: only the up→down transition pulses the one-frame
+                // latches. Tab toggles the camera; Esc is the two-stage back (route through g_esc,
+                // the main loop decides console-vs-quit — no instakill on Linux either).
+                if (down && !g_keys[idx]) {
+                    if (idx == K_TAB)    g_view_toggle = 1;
+                    if (idx == K_ESCAPE) g_esc = 1;
+                }
+                g_keys[idx] = (uint8_t)down;
+            }
             return;
         }
         case ConfigureNotify:
@@ -152,6 +170,24 @@ static void handle_event(XEvent *e) {
             if ((Atom)e->xclient.data.l[0] == g_wmdelete) g_running = 0;   // window close box
             return;
     }
+}
+
+// One lockstep frame — the twin of mac.c's/win.c's net_step. Exchange my input+checksum for the
+// peer's, place both inputs by role, trip the desync wire every NET_CHECK_EVERY frames. Returns
+// non-zero when the peer is gone.
+#define NET_CHECK_EVERY 30
+static int net_step(uint64_t *mysum, long frame, Input local, Input in[2]) {
+    Input remote; uint64_t rsum;
+    if (net_exchange(&local, &remote, *mysum, &rsum)) {
+        fprintf(stderr, "[net] peer disconnected at frame %ld — stopping network play.\n", frame);
+        return -1;
+    }
+    if (net_role() == 0) { in[0] = local;  in[1] = remote; }
+    else                 { in[0] = remote; in[1] = local;  }
+    if ((frame % NET_CHECK_EVERY) == 0 && *mysum != rsum)
+        fprintf(stderr, "[net] DESYNC at frame %ld (local=%llu remote=%llu)\n",
+                frame, (unsigned long long)*mysum, (unsigned long long)rsum);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -227,8 +263,8 @@ int main(int argc, char **argv) {
         for (int f = 0; f < n; f++) {
             Input in[2];
             if (keys) SCRIPT(f);
-            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, (f % 23) == 0, 0 };
-                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, (f % 31) == 0, 0 }; }
+            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, 0, 0, (uint8_t)((f % 23) == 0), 0 };
+                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, 0, 0, (uint8_t)((f % 31) == 0), 0 }; }
             g->tick(in);
         }
         g->draw();
@@ -308,24 +344,59 @@ int main(int argc, char **argv) {
     clock_gettime(CLOCK_MONOTONIC, &next);
     const long step_ns = 16666667L;   // 1/60 s
 
+    // Lockstep bookkeeping (only live once a menu co-op or --host/--join stands the net up).
+    uint64_t mysum = net_active() ? g->checksum() : 0;
+    long     net_frame = 0;
+
     while (g_running) {
         while (XPending(g_dpy)) { XEvent e; XNextEvent(g_dpy, &e); handle_event(&e); }
         if (!g_running) break;
 
-        Input in[2]; read_input(in);
+        Input in[2];
+        if (net_active()) {
+            // Read the LOCAL keyboard, merge WASD+arrows into this player's one Input (input_1p),
+            // exchange it with the peer. The result lands in slot [0] (host) or [1] (joiner).
+            Input raw[2]; read_input(raw);
+            Input local = input_1p(raw);
+            if (net_step(&mysum, net_frame, local, in)) { net_close(); continue; }
+        } else {
+            read_input(in);
+        }
         g->tick(in);
+        // The two-stage Esc, mirroring mac.c/win.c: the menu eats g_esc in its own tick to start
+        // the CRT power-off; a latch still set means a real cartridge ignored it — swap back to the
+        // console (return flag → insert plays in reverse). g_quit ends the loop after the power-off.
+        if (g_esc) {
+            if (g != &game_menu) { g_menu_return = 1; g_switch_to = &game_menu; }
+            g_esc = 0;
+        }
+        if (g_quit) break;
         if (g_switch_to) {
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);   // silence the old game before the new one speaks; the platform's job
+            g3d_light(0, 0, 0);       // and back to the headlamp — a cartridge's light is content, like its song
+            // Menu-driven co-op (g_coop: 1 HOST / 2 JOIN), the command-line-free twin of --host/--join.
+            // 🔴 SEAM (same as mac.c): JOIN targets 127.0.0.1 — a two-window test on one box; remote
+            // co-op still needs a --join <ip> flag.
+            int was_active = net_active();
+            if (g_coop && !was_active) {
+                int ok = (g_coop == 1) ? net_host(NET_DEFAULT_PORT)
+                                       : net_join("127.0.0.1", NET_DEFAULT_PORT);
+                if (ok != 0) fprintf(stderr, "[net] menu co-op setup failed — staying solo.\n");
+                g_coop = 0;
+            }
             g->init();
             memset(g_keys, 0, sizeof g_keys);
             XStoreName(g_dpy, g_win, g->name);
+            if (net_active()) { mysum = g->checksum(); net_frame = was_active ? net_frame + 1 : 0; }
             continue;
         }
         g->audio();
         g->draw();
         present();
         XFlush(g_dpy);
+
+        if (net_active()) { mysum = g->checksum(); net_frame++; }
 
         next.tv_nsec += step_ns;
         while (next.tv_nsec >= 1000000000L) { next.tv_nsec -= 1000000000L; next.tv_sec++; }

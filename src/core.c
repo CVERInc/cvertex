@@ -16,6 +16,18 @@ void tables_init(void) {
 uint8_t  g_fb[MAXFBW * MAXFBH];
 int g_fbw, g_fbh;
 int32_t g_dev_camz;
+int      g_mx, g_my;   // pointer, in framebuffer pixels (top-left origin)
+uint8_t  g_mbtn;       // bit0 = left button, bit1 = right button
+uint8_t  g_view_toggle;// one-frame edge: platform pulses (Tab / --view), a game consumes it
+uint8_t  g_esc;        // one-frame edge: platform pulses (Esc / CV_ESC_AT), the shell routes it
+int      g_menu_return;   // platform -> menu: returned from a game, play the insert in reverse (all platforms link)
+int      g_quit;          // menu -> platform: the CRT power-off finished, stop the loop
+// The OPTIONS panel's settings. 🔴 Zero-init IS the default for every one — off / solo /
+// windowed / first-person — so the synth.c non-zero-initializer lesson holds (these live in
+// __bss, nothing on disk) AND "untouched == today's behaviour" is true by construction. The
+// menu raises g_crt_off to 1 at init() (the collapse plays by default); mac.c sets g_fullscreen
+// from the --fullscreen flag. Both are runtime assignments, never data-segment initializers.
+int      g_gentle, g_coop, g_fullscreen, g_crt_off, g_cam_chase;
 
 void fb_resize(int w, int h) {
     if (w > MAXFBW) w = MAXFBW;

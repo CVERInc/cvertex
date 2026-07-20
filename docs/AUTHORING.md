@@ -74,8 +74,24 @@ static uint64_t checksum(void) {                      // rule 8: the WHOLE state
     return h;
 }
 
-const Game game_hello = { "hello", init, tick, audio, draw, checksum };
+const Game game_hello = { "hello", init, tick, audio, draw, checksum, "CVER Inc." };
 ```
+
+### Signing your cartridge
+
+The last field is the **developer** — who made this game. It's optional and comes
+last, so a cartridge written before the field existed still compiles; leave it off
+(or `NULL`) and the cartridge reads as anonymous. On the shelf, the console writes
+the game's name across the front of its cartridge and the developer across the back —
+press **Up** to flip the selected cart over and read it.
+
+```c
+const Game game_hello = { "hello", init, tick, audio, draw, checksum, "CVER Inc." };
+//                                                                     ^ shows on the cart's back
+```
+
+Our own games sign `"CVER Inc."`. If you contribute a game, sign it with **your** name
+or studio — it's your cartridge on the shelf, and the credit is yours.
 
 That compiles, centres on any screen, takes WASD *or* the arrow keys, and makes a
 noise. Everything below is why each line is the way it is.
@@ -207,7 +223,9 @@ rebuild. There is nothing else to touch, and nothing names your cartridge but yo
 > 1. The file includes `core.h`, `game.h`, `synth.h`, `text.h` and defines nothing they
 >    already define (not `Input`, not `Game`, not `g_pal`).
 > 2. It ends with exactly one exported symbol, `const Game game_<name> = { "<name>", init,
->    tick, audio, draw, checksum };`. Every other file-scope declaration is `static`.
+>    tick, audio, draw, checksum, "<developer>" };`. The developer string is optional and
+>    comes last (omit it or pass `NULL` for anonymous); it shows on the cartridge's back on the
+>    shelf. Every other file-scope declaration is `static`.
 > 3. `init()` starts with `tables_init();`, then sets `g_pal[i]` entries as `0xAARRGGBB`
 >    (index 0 is the clear colour). `draw()` starts with `fb_clear(...)`.
 > 4. The framebuffer is sized at runtime: `g_fbw`, `g_fbh`. NEVER hardcode a pixel width,

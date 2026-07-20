@@ -79,6 +79,30 @@ void g3d_project(int32_t x, int32_t y, int32_t z, int16_t *sx, int16_t *sy) {
     *sy = (int16_t)(g_fbh / 2 - (int32_t)(((int64_t)y * PROJ) / zz));
 }
 
+// World -> view for a CAMERA, which is not the same thing as undoing an object's rotation.
+//
+// g3d_unrot peels the angles off in the order Z, X, Y, so the pitch comes off around the WORLD's
+// X axis. That is the exact inverse of g3d_rot and it is right for objects — but a camera has to
+// undo its YAW first, so that the pitch then happens around the axis the camera is actually
+// looking along. Get it backwards and the two rotations mix into ROLL: with yaw and pitch both
+// non-zero the horizon tips instead of the view looking up and down. (They agree, and the bug
+// hides, whenever either angle is zero — which is why it went unnoticed until a first-person
+// camera turned its head and then looked up.)
+//
+// So: undo yaw, then pitch, then roll. Kept as its own function rather than a fix inside
+// g3d_unrot, because g3d_unrot's object semantics are correct and several cartridges depend on
+// them — the editor's two-axis pick ray among them. This one is only for camera orientation.
+void g3d_view(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
+    int32_t x = *px, y = *py, z = *pz, t;
+    int32_t s = SIN(-ay), c = COS(-ay);                              // 1. yaw: face the camera down +Z
+    t = mul15(x, c) + mul15(z, s);  z = mul15(z, c) - mul15(x, s);  x = t;
+    s = SIN(-ax); c = COS(-ax);                                      // 2. pitch, about the camera's own X
+    t = mul15(y, c) - mul15(z, s);  z = mul15(z, c) + mul15(y, s);  y = t;
+    s = SIN(-az); c = COS(-az);                                      // 3. roll last
+    t = mul15(x, c) - mul15(y, s);  y = mul15(y, c) + mul15(x, s);  x = t;
+    *px = x; *py = y; *pz = z;
+}
+
 // g3d_rot turns about Y, then X, then Z. Undoing that means Z, then X, then Y, each
 // negated — reverse the order as well as the signs, or two axes at once come out wrong.
 void g3d_unrot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
@@ -94,6 +118,22 @@ void g3d_unrot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
 
 #define MAXV 2048
 #define MAXT 4096
+
+// The light (see g3d.h). The zero vector MEANS the headlamp and is decoded at use, so the
+// state zero-inits into __bss — a non-zero initializer here would be four bytes of __data
+// dragging a 16 KB page into the file (synth.c's rule, same floppy). The headlamp constant
+// is -32768 and not -32767 so the default is BIT-identical to the old hardwired shade:
+// nz * -32768 * 8 >> 30 == -nz * 8 >> 15 exactly, power-of-two shifts all the way down.
+// Every game that never asks for a light renders the same pixels it always did.
+static int32_t g_lx, g_ly, g_lz;
+void g3d_light(int32_t lx, int32_t ly, int32_t lz) { g_lx = lx; g_ly = ly; g_lz = lz; }
+static int light_shade(int32_t nx, int32_t ny, int32_t nz) {
+    int64_t d = (g_lx | g_ly | g_lz)
+              ? (int64_t)nx * g_lx + (int64_t)ny * g_ly + (int64_t)nz * g_lz
+              : (int64_t)nz * -32768;
+    int shade = (int)(d * 8 >> 30);
+    return shade < 0 ? 0 : shade > 7 ? 7 : shade;
+}
 
 void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
     int32_t vx[MAXV], vy[MAXV], vz[MAXV];
@@ -147,9 +187,7 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
         const Tri *t = &m->t[keep[k]];
         int32_t nx = t->nx, ny = t->ny, nz = t->nz;
         g3d_rot(&nx, &ny, &nz, ax, ay, az);
-        int shade = (-nz * 8) >> 15;
-        if (shade < 0) shade = 0;
-        if (shade > 7) shade = 7;
+        int shade = light_shade(nx, ny, nz);
         P3 v[3] = { { vx[t->a], vy[t->a], vz[t->a] },
                     { vx[t->b], vy[t->b], vz[t->b] },
                     { vx[t->c], vy[t->c], vz[t->c] } };
@@ -200,7 +238,7 @@ void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int 
             x += in->pos.x; y += in->pos.y; z += in->pos.z;
             g3d_rot(&x, &y, &z, rx, ry, rz);          // the scene's own turn -> world
             x -= cam->pos.x; y -= cam->pos.y; z -= cam->pos.z;
-            g3d_unrot(&x, &y, &z, cam->ax, cam->ay, cam->az);   // world -> view
+            g3d_view(&x, &y, &z, cam->ax, cam->ay, cam->az);    // world -> view (camera order)
             sv_x[nv] = x; sv_y[nv] = y; sv_z[nv] = z;
             g3d_project(x, y, z, &sv_sx[nv], &sv_sy[nv]);
             nv++;
@@ -216,14 +254,14 @@ void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int 
             int32_t nx = tr->nx, ny = tr->ny, nz = tr->nz;
             g3d_rot(&nx, &ny, &nz, in->ax, in->ay, in->az);
             g3d_rot(&nx, &ny, &nz, rx, ry, rz);
-            g3d_unrot(&nx, &ny, &nz, cam->ax, cam->ay, cam->az);
+            g3d_view(&nx, &ny, &nz, cam->ax, cam->ay, cam->az);   // normals ride the same transform,
+                                                                 // or lighting/culling desync from the geometry
             int32_t cx = (sv_x[a] + sv_x[b] + sv_x[c]) / 3;
             int32_t cy = (sv_y[a] + sv_y[b] + sv_y[c]) / 3;
             int32_t cz = (sv_z[a] + sv_z[b] + sv_z[c]) / 3;
             if ((int64_t)nx * cx + (int64_t)ny * cy + (int64_t)nz * cz >= 0) continue;
 
-            int shade = (-nz * 8) >> 15;
-            if (shade < 0) shade = 0; else if (shade > 7) shade = 7;
+            int shade = light_shade(nx, ny, nz);
             st[nt].a = (uint16_t)a; st[nt].b = (uint16_t)b; st[nt].c = (uint16_t)c;
             st[nt].ci = (uint8_t)(tr->ci + shade);
             nt++;

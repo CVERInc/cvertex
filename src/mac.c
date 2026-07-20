@@ -14,11 +14,15 @@
 #include "core.h"
 #include "synth.h"
 #include "game.h"
+#include "g3d.h"
+#include "net.h"          // deterministic lockstep networking (opt-in via --host/--join)
 #include "games.gen.h"   // the cartridge roster, generated from games/*.c by tools/gen-games.sh
 
 // A game asked to be replaced. The platform owns this because switching games is what a
 // platform does; a game just points at the next one.
 const Game *g_switch_to;
+// g_menu_return / g_quit (the two-stage Esc's platform facts) live in core.c beside g_esc, so
+// every platform (win.c / lnx.c) links even before it routes Esc — menu.c uses them on all builds.
 
 #define SEL_(s) sel_registerName(s)
 #define CLS_(s) ((id)objc_getClass(s))
@@ -104,10 +108,38 @@ static void pump_events(id app, id mode) {
             continue;
         }
 
+        // The pointer. Types 1..7 are the mouse: Left/Right Down/Up, MouseMoved, and the two
+        // Dragged variants. locationInWindow is window-space POINTS with a bottom-left origin;
+        // the blit scales the g_fbw×g_fbh image to fill the (non-resizable) content view at
+        // exactly 2×, and g_fb's origin is top-left — so halve, and flip y. Buttons set/clear
+        // bits. We do NOT consume the event: the window still wants it for title-bar drags.
+        if (t >= 1 && t <= 7) {
+            CGPoint p = MSG(CGPoint)(ev, SEL_("locationInWindow"));
+            int fx = (int)(p.x * 0.5), fy = (int)((double)g_fbh - p.y * 0.5);
+            if (fx < 0) fx = 0; else if (fx > g_fbw - 1) fx = g_fbw - 1;
+            if (fy < 0) fy = 0; else if (fy > g_fbh - 1) fy = g_fbh - 1;
+            g_mx = fx; g_my = fy;
+            if      (t == 1) g_mbtn |= 1;              // LeftMouseDown
+            else if (t == 2) g_mbtn &= (uint8_t)~1;    // LeftMouseUp
+            else if (t == 3) g_mbtn |= 2;              // RightMouseDown
+            else if (t == 4) g_mbtn &= (uint8_t)~2;    // RightMouseUp
+            // fall through: forward the event so the rest of AppKit still sees it
+        }
+
         if (t == 10 || t == 11) {  // NSEventTypeKeyDown / KeyUp
             unsigned short kc = MSG(unsigned short)(ev, SEL_("keyCode"));
+            // Tab (keycode 48) is the view/camera cycle — a single edge pulse into the
+            // draw-side latch a cartridge consumes. Fire ONLY on the up->down transition
+            // (g_keys[48] still 0), so macOS key-repeat's stream of keyDowns can't strobe
+            // the camera while Tab is held. It's not in the Input struct on purpose: the
+            // camera is a comfort choice, not a move the deterministic sim ever sees.
+            if (kc == 48 && t == 10 && !g_keys[48]) g_view_toggle = 1;
+            // Esc (keycode 53) is the two-stage back button now, not a hard quit. Pulse the
+            // latch on the keydown EDGE only (like Tab) so key-repeat can't strobe it; the
+            // routing in the main loop decides what it means (menu → power-off, game → back to
+            // the console). See core.h / game.h.
+            if (kc == 53 && t == 10 && !g_keys[53]) g_esc = 1;
             if (kc < 128) g_keys[kc] = (t == 10);
-            if (kc == 53) g_running = 0;  // Esc
 
             // Don't pass it on. A keyDown that reaches the end of the responder chain
             // unhandled makes AppKit beep — and holding a key down beeps once per repeat.
@@ -131,16 +163,50 @@ static void pump_events(id app, id mode) {
 // happily, so every test passed. A test rig that can reach somewhere the player can't is
 // a test rig that verifies a game nobody is playing.
 static void read_input(Input in[2]) {
-    // WASD and the arrows are the ground. Jump and act get their own keys, because a 3D
-    // game needs both ground axes and can't spend one on jumping.
-    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]),        // D - A
-                     (int8_t)(g_keys[13] - g_keys[1]),       // W - S
+    // Dual-stick on one keyboard. WASD is player 1's LEFT stick (MOVE): W/S forward-back,
+    // A/D strafe. The arrows are player 1's RIGHT stick (LOOK): left/right yaw, up/down pitch.
+    // Jump and act get their own keys, because a 3D game needs both ground axes and can't
+    // spend one on jumping. This maps 1:1 to a Bluetooth gamepad's two analog sticks later.
+    //
+    // 🔴 The arrows do DOUBLE DUTY, on purpose: they fill player 1's LOOK (in[0].rx/ry) AND
+    // player 2's MOVE (in[1].x/y). A single-player dual-stick game (WASD move + arrows
+    // look) reads in[0]'s four axes and ignores in[1]; a local-2P game (WASD vs arrows)
+    // reads in[1].x/y and ignores the look fields. Each cartridge reads only what it wants, so
+    // both schemes live on the same keyboard with no key fighting over two meanings at once.
+    in[0] = (Input){ (int8_t)(g_keys[2] - g_keys[0]),        // D - A   (P1 strafe)
+                     (int8_t)(g_keys[13] - g_keys[1]),       // W - S   (P1 forward/back)
+                     (int8_t)(g_keys[124] - g_keys[123]),    // -> - <- (P1 look yaw)
+                     (int8_t)(g_keys[126] - g_keys[125]),    // up - down (P1 look pitch)
                      g_keys[49],                             // space
                      g_keys[14] };                           // E
-    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),          // -> - <-
-                     (int8_t)(g_keys[126] - g_keys[125]),          // up - down
+    in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),          // -> - <-   (P2 move x)
+                     (int8_t)(g_keys[126] - g_keys[125]),          // up - down (P2 move y)
+                     0, 0,                                         // P2 has no look stick on the keys
                      g_keys[36],                                   // return
                      (uint8_t)(g_keys[60] | g_keys[44]) };         // right shift or /
+}
+
+// One lockstep frame. `local` is THIS machine's player, already merged to a single Input.
+// We send it (plus our pre-tick checksum) and block for the peer's, then assemble the SAME
+// in[2] on both ends — host's input in [0], joiner's in [1] — regardless of who we are. The
+// caller ticks with in[2] and then refreshes *mysum with g->checksum().
+//
+// *mysum is the state checksum as of the END of the previous frame (or just after init for
+// frame 0). Both peers exchange that same quantity, so a mismatch means the sims have
+// already diverged — the desync tripwire. We don't crash; lockstep's job is to notice.
+#define NET_CHECK_EVERY 30   // compare checksums this often (they ride every packet regardless)
+static int net_step(uint64_t *mysum, long frame, Input local, Input in[2]) {
+    Input remote; uint64_t rsum;
+    if (net_exchange(&local, &remote, *mysum, &rsum)) {
+        fprintf(stderr, "[net] peer disconnected at frame %ld — stopping network play.\n", frame);
+        return -1;
+    }
+    if (net_role() == 0) { in[0] = local;  in[1] = remote; }   // host drives P1
+    else                 { in[0] = remote; in[1] = local;  }   // joiner drives P2
+    if ((frame % NET_CHECK_EVERY) == 0 && *mysum != rsum)
+        fprintf(stderr, "[net] DESYNC at frame %ld (local=%llu remote=%llu)\n",
+                frame, (unsigned long long)*mysum, (unsigned long long)rsum);
+    return 0;
 }
 
 int main(int argc, char **argv) {
@@ -159,6 +225,29 @@ int main(int argc, char **argv) {
     // same run, so a question like "does a flat shape fit through that gap" gets an
     // answer instead of an opinion. It's also, exactly, a replay.
     const char *keys = 0;
+    // The pointer's answer to --keys: a scripted mouse track for --ppm/--headless, since
+    // neither a headless render nor a test harness has a real mouse. "x,y,btn;x,y,btn;..."
+    // one entry per frame (btn: bit0=left, bit1=right); the last entry repeats once it runs
+    // out. This is what makes the box editor verifiable without a live hand on the mouse.
+    const char *mousearg = 0;
+    // The Tab key's answer to --keys: a scripted view-toggle track for --ppm/--headless,
+    // since neither a headless render nor a test harness can press Tab. One char per frame;
+    // 't' (or 'T') PULSES the view-toggle latch that frame, anything else leaves it be.
+    // Kept a SEPARATE channel from --keys on purpose: a camera cycle must never steal a
+    // frame of movement, so the SAME --keys drives a byte-identical sim whether the camera
+    // is toggled or not — which is exactly how the draw-side/sim split gets proven.
+    const char *viewarg = 0;
+    // The RIGHT stick's answer to --keys: a scripted LOOK track for --ppm/--headless, since
+    // neither a headless render nor a test harness can feel an analog stick (the same reason
+    // --mouse and --view exist). One char per frame, driving player 1's look field in[0].rx/ry:
+    //   .  idle      l/r  look left / right (yaw)      u/d  look up / down (PITCH)
+    // A SEPARATE channel from --keys so a self-check can drive LOOK in isolation without also
+    // waking player 2 (whom the real arrow keys would) — exactly what verifies pitch headlessly.
+    const char *lookarg = 0;
+    // Networking is strictly opt-in: with neither --host nor --join, none of this is touched
+    // and the engine runs exactly as it always has.
+    int net_want = 0, net_is_host = 0, net_port = NET_DEFAULT_PORT;
+    const char *net_ip = 0;
     const Game *const *games = GEN_GAMES;   // whatever cartridges live in games/, in folder order
     #define NGAMES GEN_NGAMES
     for (int a = 1; a < argc; a++) {
@@ -166,6 +255,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[a], "--fullscreen")) fullscreen = 1;
         else if (!strcmp(argv[a], "--camz") && a + 1 < argc) { g_dev_camz = (int32_t)(atof(argv[a+1]) * 65536); a++; }
         else if (!strcmp(argv[a], "--keys") && a + 1 < argc) { keys = argv[a+1]; a++; }
+        else if (!strcmp(argv[a], "--mouse") && a + 1 < argc) { mousearg = argv[a+1]; a++; }
+        else if (!strcmp(argv[a], "--view") && a + 1 < argc) { viewarg = argv[a+1]; a++; }
+        else if (!strcmp(argv[a], "--look") && a + 1 < argc) { lookarg = argv[a+1]; a++; }
+        else if (!strcmp(argv[a], "--host")) {   // listen, become player 1; port is optional
+            net_want = 1; net_is_host = 1;
+            if (a + 1 < argc && argv[a+1][0] >= '0' && argv[a+1][0] <= '9') { net_port = atoi(argv[a+1]); a++; }
+        }
+        else if (!strcmp(argv[a], "--join") && a + 1 < argc) {   // connect, become player 2
+            net_want = 1; net_is_host = 0; net_ip = argv[a+1]; a++;
+            if (a + 1 < argc && argv[a+1][0] >= '0' && argv[a+1][0] <= '9') { net_port = atoi(argv[a+1]); a++; }
+        }
         else if (!strcmp(argv[a], "--game") && a + 1 < argc) {
             g = 0;
             if (!strcmp(argv[a+1], "menu")) g = &game_menu;
@@ -184,12 +284,20 @@ int main(int argc, char **argv) {
             printf("                    available:");
             for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);
             printf("\n");
+            printf("  --host [port]     lockstep co-op: listen, be player 1 (default port %d)\n", NET_DEFAULT_PORT);
+            printf("  --join <ip> [port] lockstep co-op: connect to a host, be player 2\n");
             printf("  --res <w> <h>     framebuffer size (default: 640 360)\n");
             printf("  --fullscreen\n");
             printf("  --camz <units>    override a game's camera distance (dev)\n");
             printf("  --keys <string>   scripted input, one char per frame, player 1:\n");
             printf("                      . idle  l/r/u/d move  j jump  a act\n");
-            printf("                      uppercase does the same for player 2\n\n");
+            printf("                      uppercase does the same for player 2\n");
+            printf("  --mouse <string>  scripted pointer for --ppm/--headless, one entry per frame:\n");
+            printf("                      \"x,y,btn;x,y,btn;...\"  btn: bit0=left bit1=right\n");
+            printf("  --view <string>   scripted view-toggle (Tab) for --ppm/--headless, one char per frame:\n");
+            printf("                      't' pulses the camera cycle that frame, anything else idles\n");
+            printf("  --look <string>   scripted RIGHT-stick LOOK for --ppm/--headless, one char per frame:\n");
+            printf("                      . idle  l/r look yaw left/right  u/d look pitch up/down (player 1)\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
             printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
@@ -200,7 +308,7 @@ int main(int argc, char **argv) {
     }
     // One char of the script -> one frame of input.
     #define SCRIPT(f) do { \
-        in[0] = (Input){ 0, 0, 0, 0 }; in[1] = (Input){ 0, 0, 0, 0 }; \
+        in[0] = (Input){ 0, 0, 0, 0, 0, 0 }; in[1] = (Input){ 0, 0, 0, 0, 0, 0 }; \
         if (keys && (size_t)(f) < strlen(keys)) { \
             char c = keys[f]; int p = (c >= 'A' && c <= 'Z') ? 1 : 0; \
             char lc = (char)(p ? c - 'A' + 'a' : c); \
@@ -208,11 +316,89 @@ int main(int argc, char **argv) {
             else if (lc == 'u') in[p].y = 1; else if (lc == 'd') in[p].y = -1; \
             else if (lc == 'j') in[p].jump = 1; else if (lc == 'a') in[p].act = 1; \
         } \
+        if (lookarg && (size_t)(f) < strlen(lookarg)) { \
+            char c = lookarg[f]; \
+            if (c == 'l') in[0].rx = -1; else if (c == 'r') in[0].rx = 1; \
+            else if (c == 'u') in[0].ry = 1; else if (c == 'd') in[0].ry = -1; \
+        } \
     } while (0)
+
+    // Parse the scripted mouse track once, into parallel arrays. In bss (static), so it costs
+    // nothing on disk and doesn't touch the stack.
+    static int mouse_x[8192], mouse_y[8192]; static uint8_t mouse_b[8192];
+    int mouse_n = 0;
+    if (mousearg) {
+        const char *s = mousearg;
+        while (*s && mouse_n < 8192) {
+            char *e;
+            long x = strtol(s, &e, 10); if (e == s) break; s = e; if (*s == ',') s++;
+            long y = strtol(s, &e, 10);                     s = e; if (*s == ',') s++;
+            long b = strtol(s, &e, 10);                     s = e;
+            mouse_x[mouse_n] = (int)x; mouse_y[mouse_n] = (int)y; mouse_b[mouse_n] = (uint8_t)b;
+            mouse_n++;
+            while (*s && *s != ';') s++; if (*s == ';') s++;
+        }
+    }
+    // Drive the pointer globals from the track for frame f (last entry repeats when it runs out).
+    #define MOUSE(f) do { if (mouse_n) { int _i = (f) < mouse_n ? (int)(f) : mouse_n - 1; \
+        g_mx = mouse_x[_i]; g_my = mouse_y[_i]; g_mbtn = mouse_b[_i]; } } while (0)
+
+    // Pulse the view-toggle latch for frame f when the --view track says 't' there. The game
+    // consumes (clears) it inside its own tick, so a non-'t' frame simply leaves it at 0 —
+    // no reset needed here. Unlike --mouse the track does NOT repeat past its end: a toggle
+    // is an event, not a held state, so silence past the string means "no more toggles."
+    #define VIEW(f) do { if (viewarg && (size_t)(f) < strlen(viewarg) && \
+        (viewarg[f] == 't' || viewarg[f] == 'T')) g_view_toggle = 1; } while (0)
 
     menu_populate(games, NGAMES);
     fb_resize(rw, rh);
+    // Dev hook: CV_MENU_RETURN=1 boots the menu straight into its reverse-insert, so the
+    // "cart rising back out of the slot" animation is renderable headlessly with --ppm without
+    // first having to launch and Esc out of a game. Same spirit as CVX_TURNTABLE.
+    if (getenv("CV_MENU_RETURN")) g_menu_return = 1;
     g->init();
+
+    // Opt-in networking: connect the two peers now, after init so the first checksum we
+    // exchange describes the same freshly-initialised state on both ends. --host blocks here
+    // until a peer joins. On failure we bail rather than silently drop to single-player.
+    if (net_want) {
+        int ok = net_is_host ? net_host(net_port) : net_join(net_ip, net_port);
+        if (ok != 0) return 1;
+    }
+
+    // --headless N over the net: two processes on one machine (or a LAN) each run N frames in
+    // lockstep, feeding only their OWN player, and print the final checksum. Because the host
+    // supplies slot [0] and the joiner slot [1] — the SAME split a single-process --headless
+    // uses — a synced pair prints the SAME sim_checksum as a solo run. That is the honest,
+    // scriptable proof of lockstep. CV_NET_TRACE=1 in the env dumps every frame's checksum.
+    if (net_active() && runmode && !strcmp(runmode, "--headless")) {
+        int n = modearg;
+        uint64_t mysum = g->checksum();
+        const char *trace = getenv("CV_NET_TRACE");
+        for (int f = 0; f < n; f++) {
+            Input in[2];
+            if (keys) SCRIPT(f);
+            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, 0, 0, (uint8_t)((f % 23) == 0), 0 };
+                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, 0, 0, (uint8_t)((f % 31) == 0), 0 }; }
+            Input local = (net_role() == 0) ? in[0] : in[1];   // I only own my own player
+            if (net_step(&mysum, f, local, in)) break;
+            MOUSE(f); VIEW(f);
+            g->tick(in);
+            mysum = g->checksum();
+            // Test hook (this networked-headless harness only): set CV_NET_DESYNC_AT=<frame>
+            // on ONE peer to corrupt the checksum it reports, proving the tripwire actually
+            // fires. It perturbs only the reported checksum, never the sim.
+            { const char *d = getenv("CV_NET_DESYNC_AT");
+              if (d && f == atoi(d)) mysum ^= 1ull; }
+            if (trace) fprintf(stderr, "f=%d sum=%llu\n", f, (unsigned long long)mysum);
+        }
+        g->draw();
+        uint64_t ink = 0;
+        for (int i = 0; i < g_fbw * g_fbh; i++) ink = ink * 3 + g_fb[i];
+        printf("game=%s frames=%d sim_checksum=%llu fb_checksum=%llu\n", g->name, n, g->checksum(), ink);
+        net_close();
+        return 0;
+    }
 
     // --headless N: no window, run N frames, print the checksum. Used to verify determinism.
     if (runmode && !strcmp(runmode, "--headless")) {
@@ -220,8 +406,9 @@ int main(int argc, char **argv) {
         for (int f = 0; f < n; f++) {
             Input in[2];
             if (keys) SCRIPT(f);
-            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, (f % 23) == 0, 0 };
-                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, (f % 31) == 0, 0 }; }
+            else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, 0, 0, (uint8_t)((f % 23) == 0), 0 };
+                   in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, 0, 0, (uint8_t)((f % 31) == 0), 0 }; }
+            MOUSE(f); VIEW(f);
             g->tick(in);
         }
         g->draw();
@@ -237,7 +424,10 @@ int main(int argc, char **argv) {
     if (runmode && !strcmp(runmode, "--ppm")) {
         int n = modearg;
         Input in[2];
-        for (int f = 0; f < n; f++) { SCRIPT(f); g->tick(in); }
+        // CV_ESC_AT=<frame> pulses the Esc latch at that frame so the shell's power-off (in the
+        // menu) or return-to-console routing is renderable headlessly. Dev hook, --ppm only.
+        const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
+        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); if (f == esc_at) g_esc = 1; g->tick(in); }
         g->draw();
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
@@ -251,7 +441,8 @@ int main(int argc, char **argv) {
     if (runmode && !strcmp(runmode, "--dump")) {
         int n = modearg;
         Input in[2];
-        for (int f = 0; f < n; f++) { SCRIPT(f); g->tick(in); }
+        const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
+        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); if (f == esc_at) g_esc = 1; g->tick(in); }
         g->draw();
         const char *ramp = " .:-=+*#%@";
         for (int y = 0; y < g_fbh; y += 8) {
@@ -323,27 +514,87 @@ int main(int argc, char **argv) {
     const uint64_t step = 16666667ULL * tb.denom / tb.numer;  // 60Hz
     uint64_t next = mach_absolute_time();
 
+    // Lockstep bookkeeping, only alive when networked. mysum is the state at the end of the
+    // last frame, which is what we hand the peer at the start of the next exchange.
+    long     net_frame = 0;
+    uint64_t mysum = net_active() ? g->checksum() : 0;
+
+    // FULLSCREEN as a live OPTIONS setting: g_fullscreen mirrors the window's current state, seeded
+    // from the --fullscreen flag. When the panel flips it, the value diverges from fs_applied and we
+    // ask the real NSWindow to toggle — a genuine runtime path on the window that already exists, no
+    // rebuild. (The panel writes g_fullscreen; the platform, which owns the window, applies it here.)
+    g_fullscreen = fullscreen;
+    int fs_applied = fullscreen;
+
     while (g_running) {
         pump_events(app, mode);
         if (MSG(BOOL)(win, SEL_("isVisible")) == NO) break;
+        if (g_fullscreen != fs_applied) {
+            MSG(void, unsigned long)(win, SEL_("setCollectionBehavior:"), 1UL << 7);
+            MSG(void, id)(win, SEL_("toggleFullScreen:"), 0);
+            fs_applied = g_fullscreen;
+        }
 
-        Input in[2]; read_input(in);
+        Input in[2];
+        if (net_active()) {
+            // Read the LOCAL keyboard and merge WASD+arrows into this player's one Input, so
+            // whichever half of the keyboard they reach for drives them. The exchange puts it
+            // in slot [0] (host) or [1] (joiner) and fills the other slot from the peer.
+            Input raw[2]; read_input(raw);
+            Input local = input_1p(raw);
+            if (net_step(&mysum, net_frame, local, in)) { net_close(); continue; }
+        } else {
+            read_input(in);
+        }
         g->tick(in);
+        // The two-stage Esc, routed here where the platform knows which cartridge is current.
+        // The menu consumes g_esc inside its OWN tick (to start its CRT power-off), so if the
+        // latch is still set the current cartridge is a real game that ignored it — swap back to
+        // the console, flagged as a return so the menu plays its insert in reverse. mac.c only
+        // routes and swaps; the menu owns both animations.
+        if (g_esc) {
+            if (g != &game_menu) { g_menu_return = 1; g_switch_to = &game_menu; }
+            g_esc = 0;
+        }
+        if (g_quit) break;   // the menu's CRT power-off has finished collapsing the tube
         if (g_switch_to) {
             // Silence first, then hand over. Stopping the music is the platform's job —
             // otherwise whatever the last game was playing follows you into the next one,
             // and every game would have to remember to shut the previous one up. Asking for
             // music is the game's job, in init(), where a song is content like any other.
+            //
+            // Lockstep survives a game switch for free: both peers fed the SAME in[2] to the
+            // menu, so both pick the same cartridge and re-init identically. Just re-baseline
+            // the checksum to the fresh state.
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);
+            g3d_light(0, 0, 0);   // and back to the headlamp — a cartridge's light is content, like its song
+            // CO-OP chosen in the OPTIONS panel (g_coop: 1 HOST / 2 JOIN): stand up the lockstep net
+            // now, as the cart plugs in — the menu-driven equivalent of the --host/--join flags, so a
+            // player never has to touch the command line. HOST blocks here until a peer joins, exactly
+            // like --host. 🔴 SEAM: JOIN has no on-screen IP entry yet, so it targets 127.0.0.1 — enough
+            // for a two-window test on one machine; remote co-op still needs --join <ip>. On failure we
+            // print and fall through to solo rather than dropping a dead socket into the loop.
+            int was_active = net_active();
+            if (g_coop && !was_active) {
+                int ok = (g_coop == 1) ? net_host(NET_DEFAULT_PORT)
+                                       : net_join("127.0.0.1", NET_DEFAULT_PORT);
+                if (ok != 0) fprintf(stderr, "[net] menu co-op setup failed — staying solo.\n");
+                g_coop = 0;   // consumed: a later Esc-back to the menu must not reconnect a live socket
+            }
             g->init();
             memset(g_keys, 0, sizeof g_keys);
+            // A net that was already live keeps counting frames; one just established starts at 0 so
+            // both peers begin the fresh game on the same frame index.
+            if (net_active()) { mysum = g->checksum(); net_frame = was_active ? net_frame + 1 : 0; }
             continue;
         }
         g->audio();
         g->draw();
         MSG(void, BOOL)(view, SEL_("setNeedsDisplay:"), YES);
         MSG(void)(view, SEL_("displayIfNeeded"));
+
+        if (net_active()) { mysum = g->checksum(); net_frame++; }
 
         next += step;
         uint64_t now = mach_absolute_time();

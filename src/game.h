@@ -32,12 +32,27 @@ typedef struct {
     // For --headless: the state, hashed. If this changes when it shouldn't, something
     // that isn't allowed to has got into tick.
     uint64_t (*checksum)(void);
+
+    // Who made this cartridge — shown on the shelf. cvertex is a community console, so a
+    // contributor signs their work here. Optional: NULL reads as anonymous. It goes LAST so a
+    // cartridge written before this field existed still compiles — its author is simply NULL —
+    // and adding it never disturbs the positional initializers already out there.
+    const char *author;
 } Game;
 
 // A game may ask to be replaced by another. The platform layer honours it between frames
 // and re-inits — which is the whole of "switching games", and it's a fact about the
 // platform, not about menus. Set it and stop caring; you won't get another tick.
 extern const Game *g_switch_to;
+
+// The other half of the two-stage Esc, and both platform facts like g_switch_to. On Esc inside
+// a game the platform swaps back to the menu AND raises g_menu_return, which the menu reads once
+// in init() to enter its reverse-insert — the cart rising back OUT of the console slot — instead
+// of the cold boot fly-in, landing on the shelf at the very cart you had selected. On Esc inside
+// the menu the menu plays its CRT power-off and then raises g_quit, which the platform reads to
+// stop the run. (win.c / lnx.c must route Esc and honour g_quit the same way to match.)
+extern int g_menu_return;   // platform -> menu: we returned from a game; play the insert in reverse
+extern int g_quit;          // menu -> platform: the CRT power-off finished; stop the loop
 
 // Every game defines a `const Game game_<name>` in its own games/<name>.c. The platform layer does
 // NOT name them here — tools/gen-games.sh scans games/*.c and writes the roster into games.gen.h, so
@@ -53,6 +68,11 @@ static inline Input input_1p(const Input in[2]) {
     Input p;
     p.x    = in[0].x ? in[0].x : in[1].x;
     p.y    = in[0].y ? in[0].y : in[1].y;
+    // The look axis rides along the same "either pad drives" rule as move — a single-scheme
+    // game that wants a look stick gets it from whichever half filled it. Keyboard never fills
+    // in[1].rx/ry (there is no second look on the keys), so in practice this is in[0]'s look.
+    p.rx   = in[0].rx ? in[0].rx : in[1].rx;
+    p.ry   = in[0].ry ? in[0].ry : in[1].ry;
     p.jump = in[0].jump | in[1].jump;      // Space or Enter — the action button
     p.act  = in[0].act  | in[1].act;
     return p;

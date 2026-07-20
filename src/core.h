@@ -44,7 +44,13 @@ void tables_init(void);       // called by sim_init; the synth depends on it too
 // can only cross in a straight line has doors you cannot reach: a slot at z=0 sits off the
 // line, and nothing could ever walk to it.
 typedef struct {
-    int8_t  x, y;      // ground plane. In 2D games y is unused; in a menu it's the list.
+    int8_t  x, y;      // ground plane / LEFT stick. In 2D games y is unused; in a menu it's the list.
+    // 🔴 The LOOK axis, appended AFTER x,y so it maps 1:1 to a gamepad's RIGHT stick — and,
+    // just as important, so every cartridge written against the old {x,y,jump,act} shape still
+    // compiles and behaves untouched: it reads x,y,jump,act and never names rx,ry, so adding
+    // these two bytes can't perturb it. A dual-stick game drives MOVE from x,y and LOOK
+    // from rx,ry; the keyboard fills rx,ry from the arrow keys (see the platform read_input).
+    int8_t  rx, ry;    // look plane / RIGHT stick. rx = yaw (turn), ry = pitch (up/down).
     uint8_t jump;      // space / return
     uint8_t act;       // the game's own verb — morph, grab, whatever it has
 } Input;
@@ -65,6 +71,48 @@ void fb_clear(uint8_t ci);
 // actually be driven into. It's here rather than improvised per test because every
 // throwaway harness written today broke; the ones with names never did.
 extern int32_t g_dev_camz;   // 0 = the game decides
+
+// ---- pointer ----------------------------------------------------------------
+// The mouse, in FRAMEBUFFER pixels (g_fb's top-left origin), plus a button bitfield
+// (bit0 = left, bit1 = right). The platform layer fills these; a cartridge that wants a
+// pointer — the box editor — reads them. 🔴 Every existing game and the whole sim ignore
+// these, so a pointer no one reads changes no determinism and no checksum: adding it is
+// invisible to everything that came before. In --ppm/--headless the harness can drive them
+// from a scripted track (--mouse), the pointer's answer to --keys.
+extern int     g_mx, g_my;
+extern uint8_t g_mbtn;
+
+// ---- view toggle ------------------------------------------------------------
+// A one-frame edge latch, exactly the mouse's bargain in a single bit: the platform layer
+// PULSES it (mac.c sets it to 1 on a Tab keydown edge, keycode 48; --view pulses it from a
+// scripted track), and a cartridge that wants a view/camera cycle CONSUMES it — reads it,
+// acts, clears it back to 0. 🔴 Every existing game and the whole sim ignore it, so a latch
+// no one reads changes no determinism and no checksum: adding it is invisible to everything
+// that came before, same as the pointer. It is deliberately NOT part of the Input struct —
+// Input is the sim contract, and a camera choice is a draw-side comfort setting, not a move.
+extern uint8_t g_view_toggle;
+
+// ---- Esc: the two-stage back button -----------------------------------------
+// A one-frame edge latch, the same bargain as the view toggle: the platform PULSES it on an
+// Esc keydown edge (mac.c keycode 53; --ppm/--dump can pulse it from CV_ESC_AT for headless
+// renders). What it MEANS is decided by who consumes it: the menu reads it in its own tick and
+// starts its CRT power-off; a real game ignores it, so the platform sees it still set after the
+// tick and swaps back to the menu (raising g_menu_return). Not in Input — a back button is a
+// shell gesture, never a move the deterministic sim is allowed to see.
+extern uint8_t g_esc;
+
+// ---- pre-game settings: the console's OPTIONS panel -------------------------
+// The shell's OPTIONS screen (Space on the shelf) writes these; the launched game and the
+// platform read them. 🔴 Every one defaults to today's behaviour, so a run that never opens
+// OPTIONS is byte-identical to before — determinism and every cartridge's self-checks are untouched
+// unless the player deliberately turns a knob. These are shell/comfort settings, deliberately
+// NOT part of the Input sim contract (same reasoning as g_esc / g_view_toggle): a preference
+// chosen BEFORE the game starts, read once, never a per-frame move the deterministic sim sees.
+extern int g_gentle;      // GENTLE MODE: a cartridge's tamed creatures never starve-revert and never cannibalise (0 = off = today's rule)
+extern int g_coop;        // CO-OP at launch: 0 SOLO, 1 HOST, 2 JOIN — the platform stands up lockstep net on the next game
+extern int g_fullscreen;  // FULLSCREEN want: the platform toggles the live window to match when it changes (0 = windowed)
+extern int g_crt_off;     // CRT POWER-OFF flourish on Esc-quit: 1 = the tube collapse plays, 0 = quit straight to black
+extern int g_cam_chase;   // camera default a 3D game may read: 0 = first-person (today), 1 = chase
 
 // ---- depth ------------------------------------------------------------------
 // 🔴 A painter's algorithm sorted per triangle is not a depth test, it's a guess that

@@ -20,6 +20,16 @@ extern const Mesh g_torus;
 // ax/ay/az: angle 0..1023 (a direct index into g_sin). tz: camera distance, 16.16.
 void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz);
 
+// The light, a direction TOWARD the source, ~unit Q15, in view space. The default is the
+// headlamp — light from the lens, (0,0,-32768) — which is what every game gets if it never
+// calls this, and what (0,0,0) restores. A headlamp puts every camera-facing surface on the
+// flat top of the cosine, where a wobble moves nothing; a game that wants light to CRAWL
+// points this off-axis in init() so the same faces land on the steep part of the curve.
+// The platform resets it on every game switch — a cartridge's taste in light is content,
+// like its palette, and must not follow you into the next game. Draw-side only: shading
+// never feeds the sim, so this cannot touch determinism.
+void g3d_light(int32_t lx, int32_t ly, int32_t lz);
+
 // One mesh, placed. Several of these make a scene.
 typedef struct {
     const Mesh *m;
@@ -51,6 +61,9 @@ void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int 
 // which is the same arithmetic backwards, and backwards means the axes come off in the
 // opposite order too. Getting only the signs right and not the order gives you a rotation
 // that's correct on one axis at a time and wrong the moment you use two.
+// Camera world->view: undoes yaw, THEN pitch, so the two never mix into roll. Use this for a
+// camera's orientation; g3d_unrot stays the exact inverse of g3d_rot, which is what objects want.
+void g3d_view(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 void g3d_unrot(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 
 // The transform, exposed so flat vector shapes ride the SAME pipeline as meshes

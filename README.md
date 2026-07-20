@@ -59,7 +59,9 @@ baked artwork outweighs all the code. Neither is the engine.
 
 - **Palette-indexed software rendering.** One byte per pixel, 256 colours, no GPU.
 - **Fixed-point 3D.** Not one float in the pipeline. Deterministic on every machine.
-- **Synthesized audio.** 2-op FM plus classic waveforms. No wav, no ogg, no decoder.
+- **Synthesized audio.** 2-op FM plus classic waveforms, sixteen music voices and one reserved
+  for sound effects, each placed in a stereo field with a shared delay-line echo. No wav, no ogg,
+  no decoder.
 - **Deterministic simulation.** Same inputs, same frame, forever — at any resolution,
   because gameplay lives in a virtual space the display can't reach. Replays and lockstep
   multiplayer come free.
@@ -67,7 +69,9 @@ baked artwork outweighs all the code. Neither is the engine.
   the drawn view nearest the facing, then keep rotating the rest of the way.
 - **Chunky or sharp is a number.** 640x360 scaled up is a 1994 pixel grid; the display's
   own resolution is the same polygons, sharp. Same art, same binary.
-- **Local co-op from day one.** The simulation never learns where input came from.
+- **Co-op, local or networked.** The simulation never learns where input came from. Because the
+  sim is deterministic, the network only has to carry INPUT: a lockstep exchange over TCP, with a
+  checksum riding every packet as a desync tripwire.
 - **A game is one file.** Drop a `.c` in `games/`, rebuild, it's on the shelf. The folder is
   the roster; nothing is wired by hand.
 - **Zero dependencies.** A C compiler is the whole toolchain.
@@ -208,8 +212,13 @@ and fix in your modelling tool.
 2-op FM (a modulator offsetting a carrier's phase — the AdLib/OPL2 voice) plus
 square, triangle, saw and LFSR noise, each with an ADSR envelope.
 
-An instrument is 12 bytes. The demo song is a 32×4 table — 64 bytes. For scale,
-a three-minute MP3 is roughly two floppies.
+An instrument is 14 bytes. A song is a table of one byte per channel per row — a byte is a hold,
+a rest, or a MIDI pitch with one bit left over to accent it. For scale, a three-minute MP3 is
+roughly two floppies.
+
+Voices are panned across a stereo field and share one delay line with a lowpass in its feedback
+loop — a room, not a reverb. A master soft-limiter keeps a full sixteen-voice tutti from clipping
+without making every voice thinner as the count grows.
 
 The simulation only emits events; the platform layer turns those into notes. The
 simulation doesn't know the synth exists, so the audio thread can't touch
