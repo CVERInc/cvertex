@@ -44,6 +44,9 @@ static const char *const MAZE[MH] = {
 };
 #define START_COL 1
 #define START_ROW 1
+// The corner you start in is walled on three sides, so the one open corridor is where you
+// face. Spawning into the wall behind you reads as a broken screen, not as a maze.
+#define START_DIR 1                     // 1 = +column, the only way out of (1,1)
 #define EXIT_COL 17
 #define EXIT_ROW 13
 #define MON_COL  9
@@ -229,7 +232,7 @@ static uint8_t g_prevX_edge, g_prevJump;
 static uint8_t g_wasLOS;
 
 static void reset_game(void) {
-    g_pcol = START_COL; g_prow = START_ROW; g_pdir = 0; g_pang = 0;
+    g_pcol = START_COL; g_prow = START_ROW; g_pdir = START_DIR; g_pang = START_DIR * 256;
     g_pwx = START_COL * CELL; g_pwz = START_ROW * CELL;
     g_pmoving = 0; g_pturning = 0; g_pmoveT = 0; g_pturnT = 0;
 
@@ -360,7 +363,7 @@ static void tick(const Input in[2]) {
         if (g_lives <= 0) { g_state = 2; }
         else {
             int pc = g_pcol, pr = g_prow;
-            g_pcol = START_COL; g_prow = START_ROW; g_pdir = 0; g_pang = 0;
+            g_pcol = START_COL; g_prow = START_ROW; g_pdir = START_DIR; g_pang = START_DIR * 256;
             g_pwx = START_COL * CELL; g_pwz = START_ROW * CELL;
             g_pmoving = 0; g_pturning = 0;
             g_mcol = MON_COL; g_mrow = MON_ROW;
@@ -493,4 +496,4 @@ static void draw(void) {
 
 static uint64_t checksum(void) { return g_checksum; }
 
-const Game game_maze = { "maze", init, tick, audio, draw, checksum };
+const Game game_maze = { "maze", init, tick, audio, draw, checksum, "CVER Inc." };

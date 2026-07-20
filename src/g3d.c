@@ -23,7 +23,7 @@ static void near_cut(const P3 *a, const P3 *b, P3 *out) {
     out->z = NEAR;
 }
 
-static void raw_tri(const P3 *v, uint8_t ci) {
+static void fill_tri(const P3 *v, uint8_t ci) {
     int16_t p[6];
     uint32_t w[3];
     for (int i = 0; i < 3; i++) {
@@ -32,6 +32,78 @@ static void raw_tri(const P3 *v, uint8_t ci) {
         w[i] = (uint32_t)(((int64_t)1 << 30) / z);
     }
     tri_fill_z(p, w, ci);
+}
+
+// How far outside the frame a vertex may land before we have to cut it away.
+//
+// 🔴 Screen coordinates are int16. A wall standing right beside the lens is barely any
+// distance away and enormously far to the side, so x * PROJ / z runs into five figures and
+// WRAPS — and a wall fifteen cells behind your shoulder reappears smeared across the middle
+// of the screen, painting the whole view one flat colour. That is a picture with no bug
+// visible in it anywhere: every triangle is correct, every normal is correct, and the frame
+// is a solid rectangle. Cutting at a generous boundary well outside the frame keeps the
+// numbers inside int16 while leaving everything that was already drawable untouched.
+#define GUARD 8192
+
+// Does this vertex project inside the guard box? z is always >= NEAR here, so no division.
+static int in_guard(const P3 *v) {
+    int64_t gz = (int64_t)GUARD * v->z;
+    int64_t px = (int64_t)v->x * PROJ, py = (int64_t)v->y * PROJ;
+    return px <= gz && -px <= gz && py <= gz && -py <= gz;
+}
+
+// Where edge a->b crosses one guard plane. da/db are the signed distances the caller
+// already computed; a is the vertex on the inside, so the rounding leans the same way
+// near_cut's does.
+static void guard_cut(const P3 *a, const P3 *b, int64_t da, int64_t db, P3 *out) {
+    int64_t den = da - db;
+    int64_t t = den ? ((da << 16) / den) : 0;
+    out->x = a->x + (int32_t)(((int64_t)(b->x - a->x) * t) >> 16);
+    out->y = a->y + (int32_t)(((int64_t)(b->y - a->y) * t) >> 16);
+    out->z = a->z + (int32_t)(((int64_t)(b->z - a->z) * t) >> 16);
+}
+
+// Signed distance to guard plane `p`: left, right, bottom, top. Inside is >= 0.
+static int64_t guard_d(int p, const P3 *v) {
+    int64_t gz = (int64_t)GUARD * v->z;
+    switch (p) {
+        case 0:  return gz + (int64_t)v->x * PROJ;
+        case 1:  return gz - (int64_t)v->x * PROJ;
+        case 2:  return gz + (int64_t)v->y * PROJ;
+        default: return gz - (int64_t)v->y * PROJ;
+    }
+}
+
+static void raw_tri(const P3 *v, uint8_t ci) {
+    // The overwhelmingly common case: the triangle is already inside the guard box, so it
+    // takes the same path it always took and comes out pixel for pixel the same.
+    if (in_guard(&v[0]) && in_guard(&v[1]) && in_guard(&v[2])) { fill_tri(v, ci); return; }
+
+    // Sutherland-Hodgman against the four sides. Each plane can add at most one vertex, so a
+    // triangle comes out of all four with seven at the very most.
+    P3 poly[8], tmp[8];
+    int n = 3;
+    poly[0] = v[0]; poly[1] = v[1]; poly[2] = v[2];
+
+    for (int p = 0; p < 4 && n >= 3; p++) {
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            const P3 *cur = &poly[i], *prev = &poly[(i + n - 1) % n];
+            int64_t dc = guard_d(p, cur), dp = guard_d(p, prev);
+            if ((dc >= 0) != (dp >= 0)) {
+                if (dp >= 0) guard_cut(prev, cur, dp, dc, &tmp[m++]);
+                else         guard_cut(cur, prev, dc, dp, &tmp[m++]);
+            }
+            if (dc >= 0) tmp[m++] = *cur;
+        }
+        n = m;
+        for (int i = 0; i < n; i++) poly[i] = tmp[i];
+    }
+
+    for (int i = 1; i + 1 < n; i++) {
+        P3 t[3] = { poly[0], poly[i], poly[i + 1] };
+        fill_tri(t, ci);
+    }
 }
 
 // Sutherland-Hodgman against one plane, which for a triangle has only four outcomes:
