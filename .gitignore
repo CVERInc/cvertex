@@ -15,3 +15,7 @@ cvertex.pdb
 
 # The box editor's default export target (games/editor.c). A generated mesh, not engine.
 editor_export.h
+
+# The incubator's own paperwork. It lives in cvertex-lab and must never land here —
+# this line is the guard, so a careless copy cannot be committed by accident.
+lab/
