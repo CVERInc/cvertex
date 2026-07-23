@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "core.h"
+#include "version.h"   // CVERTEX_VERSION — the --version flag, same constant the boot screen shows
 #include "synth.h"
 #include "game.h"
 #include "g3d.h"
@@ -311,8 +312,9 @@ int main(int argc, char **argv) {
             }
             a++;
         }
+        else if (!strcmp(argv[a], "--version")) { printf("cvertex %s\n", CVERTEX_VERSION); return 0; }
         else if (!strcmp(argv[a], "--help") || !strcmp(argv[a], "-h")) {
-            printf("cvertex — a game engine that draws worlds out of shapes\n\n");
+            printf("cvertex %s — a game engine that draws worlds out of shapes\n\n", CVERTEX_VERSION);
             printf("  --game <name>     which game to run (default: the menu)\n");
             printf("                    available:");
             for (int k = 0; k < NGAMES; k++) printf(" %s", games[k]->name);
@@ -335,7 +337,8 @@ int main(int argc, char **argv) {
             printf("                      . idle  u zoom in (wheel up)  d zoom out (wheel down)\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
-            printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
+            printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n");
+            printf("  --version         print the version and exit\n\n");
             printf("  Controls vary by game: A/D/W + Space/E for one player, the arrows + Enter for a second. Esc quits.\n");
             return 0;
         }

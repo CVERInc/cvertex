@@ -11,6 +11,7 @@
 #include "synth.h"
 #include "text.h"
 #include "g3d.h"
+#include "version.h"   // CVERTEX_VERSION — printed in the boot screen's corner
 
 #define U (1 << 16)
 
@@ -1106,6 +1107,9 @@ static void draw(void) {
         g3d_scene(bi, NLET, &cam, 0, 0, 0);
         // speed streaks toward the end, then a clean logo
         text_draw(cx - text_width("PRESS ANY KEY", s) / 2, g_fbh - 16 * s, s, "PRESS ANY KEY", 1);
+        // the build's version, tucked in the bottom-right corner the way a '90s BIOS wore it. Read
+        // from version.h — the same constant --version prints, so a release bumps one line.
+        text_draw(g_fbw - text_width("v" CVERTEX_VERSION, s) - 3 * s, g_fbh - 8 * s, s, "v" CVERTEX_VERSION, 1);
         return;
     }
 
