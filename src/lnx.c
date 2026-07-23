@@ -29,7 +29,7 @@ const Game *g_switch_to;
 // about into a small dense array the way win.c indexes by virtual-key code.
 enum { K_A, K_D, K_W, K_S, K_SPACE, K_E,
        K_LEFT, K_RIGHT, K_UP, K_DOWN, K_RETURN, K_RSHIFT, K_SLASH,
-       K_TAB, K_ESCAPE, NKEYS };
+       K_TAB, K_ESCAPE, K_F3, NKEYS };
 static uint8_t g_keys[NKEYS];
 static int     g_running;
 
@@ -121,6 +121,7 @@ static int keyidx(KeySym ks) {
         case XK_slash:        return K_SLASH;
         case XK_Tab:          return K_TAB;
         case XK_Escape:       return K_ESCAPE;
+        case XK_F3:           return K_F3;
         default:              return -1;
     }
 }
@@ -155,6 +156,7 @@ static void handle_event(XEvent *e) {
                 if (down && !g_keys[idx]) {
                     if (idx == K_TAB)    g_view_toggle = 1;
                     if (idx == K_ESCAPE) g_esc = 1;
+                    if (idx == K_F3)     g_debug_toggle = 1;   // dev debug overlay
                 }
                 g_keys[idx] = (uint8_t)down;
             }

@@ -47,6 +47,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT m, WPARAM w, LPARAM l) {
             // (route it through g_esc; the main loop decides console-vs-quit, never an instakill).
             if (w == VK_TAB    && !g_keys[VK_TAB])    g_view_toggle = 1;
             if (w == VK_ESCAPE && !g_keys[VK_ESCAPE]) g_esc = 1;
+            if (w == VK_F3     && !g_keys[VK_F3])     g_debug_toggle = 1;   // F3 → dev debug overlay
             if (w < 256) g_keys[w] = 1;
             return 0;
         case WM_KEYUP: case WM_SYSKEYUP:

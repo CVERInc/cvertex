@@ -90,6 +90,7 @@ static void audio_start(void) {
 
 static void pump_events(id app, id mode) {
     id past = MSG(id)(CLS_("NSDate"), SEL_("distantPast"));
+    g_digit = -1;   // the digit pulse lives for exactly the frame its key went down
     for (;;) {
         id ev = MSG(id, unsigned long long, id, id, BOOL)(app,
             SEL_("nextEventMatchingMask:untilDate:inMode:dequeue:"), ~0ULL, past, mode, YES);
@@ -108,12 +109,13 @@ static void pump_events(id app, id mode) {
             continue;
         }
 
-        // The pointer. Types 1..7 are the mouse: Left/Right Down/Up, MouseMoved, and the two
-        // Dragged variants. locationInWindow is window-space POINTS with a bottom-left origin;
-        // the blit scales the g_fbw×g_fbh image to fill the (non-resizable) content view at
-        // exactly 2×, and g_fb's origin is top-left — so halve, and flip y. Buttons set/clear
-        // bits. We do NOT consume the event: the window still wants it for title-bar drags.
-        if (t >= 1 && t <= 7) {
+        // The pointer. Types 1..7 are the left/right mouse (Down/Up, MouseMoved, the two Dragged
+        // variants); 25..27 are the OTHER-button mouse (middle, for the editor's Maya camera).
+        // locationInWindow is window-space POINTS with a bottom-left origin; the blit scales the
+        // g_fbw×g_fbh image to fill the (non-resizable) content view at exactly 2×, and g_fb's
+        // origin is top-left — so halve, and flip y. Buttons set/clear bits. We do NOT consume the
+        // event: the window still wants it for title-bar drags.
+        if ((t >= 1 && t <= 7) || (t >= 25 && t <= 27)) {
             CGPoint p = MSG(CGPoint)(ev, SEL_("locationInWindow"));
             int fx = (int)(p.x * 0.5), fy = (int)((double)g_fbh - p.y * 0.5);
             if (fx < 0) fx = 0; else if (fx > g_fbw - 1) fx = g_fbw - 1;
@@ -123,7 +125,20 @@ static void pump_events(id app, id mode) {
             else if (t == 2) g_mbtn &= (uint8_t)~1;    // LeftMouseUp
             else if (t == 3) g_mbtn |= 2;              // RightMouseDown
             else if (t == 4) g_mbtn &= (uint8_t)~2;    // RightMouseUp
+            else if (t == 25 || t == 26) {             // OtherMouseDown/Up — only the MIDDLE (button 2)
+                long bn = MSG(long)(ev, SEL_("buttonNumber"));
+                if (bn == 2) { if (t == 25) g_mbtn |= 4; else g_mbtn &= (uint8_t)~4; }
+            }
+            // t == 27 (OtherMouseDragged) falls through with position updated — a middle-drag orbit.
             // fall through: forward the event so the rest of AppKit still sees it
+        }
+
+        // The scroll wheel — zoom for the editor's camera. Accumulate notches; any nonzero delta
+        // registers at least ±1 so a trackpad's fine scrolling still zooms. UI only, never hashed.
+        if (t == 22) {  // NSEventTypeScrollWheel
+            double dy = MSG(double)(ev, SEL_("scrollingDeltaY"));
+            int d = (int)dy; if (d == 0 && dy != 0.0) d = (dy > 0.0) ? 1 : -1;
+            g_wheel += d;
         }
 
         if (t == 10 || t == 11) {  // NSEventTypeKeyDown / KeyUp
@@ -139,6 +154,20 @@ static void pump_events(id app, id mode) {
             // routing in the main loop decides what it means (menu → power-off, game → back to
             // the console). See core.h / game.h.
             if (kc == 53 && t == 10 && !g_keys[53]) g_esc = 1;
+            // '/' (keycode 44, and '?' with shift) → a one-frame edge pulse; a cartridge toggles its
+            // on-demand manual. Edge-only so a held key can't strobe it open/shut.
+            if (kc == 44 && t == 10 && !g_keys[44]) g_help_toggle = 1;
+            // F3 (keycode 99) → the dev debug overlay, edge-only like the rest (Minecraft's binding).
+            if (kc == 99 && t == 10 && !g_keys[99]) g_debug_toggle = 1;
+            // Number row 1..9,0 → a one-frame digit pulse on the keydown EDGE (like Tab/Esc, so a held
+            // key can't strobe). A cartridge can read g_digit for a dev-gated debug shortcut; it's never
+            // in the Input struct, so it steers no deterministic sim.
+            if (t == 10 && !g_keys[kc]) switch (kc) {
+                case 18: g_digit = 1; break; case 19: g_digit = 2; break; case 20: g_digit = 3; break;
+                case 21: g_digit = 4; break; case 23: g_digit = 5; break; case 22: g_digit = 6; break;
+                case 26: g_digit = 7; break; case 28: g_digit = 8; break; case 25: g_digit = 9; break;
+                case 29: g_digit = 0; break;
+            }
             if (kc < 128) g_keys[kc] = (t == 10);
 
             // Don't pass it on. A keyDown that reaches the end of the responder chain
@@ -244,6 +273,9 @@ int main(int argc, char **argv) {
     // A SEPARATE channel from --keys so a self-check can drive LOOK in isolation without also
     // waking player 2 (whom the real arrow keys would) — exactly what verifies pitch headlessly.
     const char *lookarg = 0;
+    // The scroll wheel's answer to --keys: one char per frame — 'u' zooms in a notch, 'd' out, any
+    // other char idles — so the editor's Maya zoom is renderable/verifiable headlessly with --ppm.
+    const char *scrollarg = 0;
     // Networking is strictly opt-in: with neither --host nor --join, none of this is touched
     // and the engine runs exactly as it always has.
     int net_want = 0, net_is_host = 0, net_port = NET_DEFAULT_PORT;
@@ -258,6 +290,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[a], "--mouse") && a + 1 < argc) { mousearg = argv[a+1]; a++; }
         else if (!strcmp(argv[a], "--view") && a + 1 < argc) { viewarg = argv[a+1]; a++; }
         else if (!strcmp(argv[a], "--look") && a + 1 < argc) { lookarg = argv[a+1]; a++; }
+        else if (!strcmp(argv[a], "--scroll") && a + 1 < argc) { scrollarg = argv[a+1]; a++; }
         else if (!strcmp(argv[a], "--host")) {   // listen, become player 1; port is optional
             net_want = 1; net_is_host = 1;
             if (a + 1 < argc && argv[a+1][0] >= '0' && argv[a+1][0] <= '9') { net_port = atoi(argv[a+1]); a++; }
@@ -297,7 +330,9 @@ int main(int argc, char **argv) {
             printf("  --view <string>   scripted view-toggle (Tab) for --ppm/--headless, one char per frame:\n");
             printf("                      't' pulses the camera cycle that frame, anything else idles\n");
             printf("  --look <string>   scripted RIGHT-stick LOOK for --ppm/--headless, one char per frame:\n");
-            printf("                      . idle  l/r look yaw left/right  u/d look pitch up/down (player 1)\n\n");
+            printf("                      . idle  l/r look yaw left/right  u/d look pitch up/down (player 1)\n");
+            printf("  --scroll <string> scripted scroll WHEEL for --ppm/--headless, one char per frame:\n");
+            printf("                      . idle  u zoom in (wheel up)  d zoom out (wheel down)\n\n");
             printf("  --headless <n>    run n frames, print checksums, no window\n");
             printf("  --dump <n>        run n frames, print the framebuffer as ASCII\n");
             printf("  --ppm <n>         run n frames, write the framebuffer to stdout as a PPM\n\n");
@@ -350,6 +385,13 @@ int main(int argc, char **argv) {
     #define VIEW(f) do { if (viewarg && (size_t)(f) < strlen(viewarg) && \
         (viewarg[f] == 't' || viewarg[f] == 'T')) g_view_toggle = 1; } while (0)
 
+    // Drive the accumulated wheel for frame f from the --scroll track: 'u' adds a notch up (zoom
+    // in), 'd' a notch down. Like the real wheel it ACCUMULATES (+=), so the tool reading-and-
+    // resetting each frame sees exactly one frame's worth; silence past the string means no scroll.
+    #define SCROLL(f) do { if (scrollarg && (size_t)(f) < strlen(scrollarg)) { \
+        char _c = scrollarg[f]; if (_c == 'u' || _c == 'U') g_wheel += 1; \
+        else if (_c == 'd' || _c == 'D') g_wheel -= 1; } } while (0)
+
     menu_populate(games, NGAMES);
     fb_resize(rw, rh);
     // Dev hook: CV_MENU_RETURN=1 boots the menu straight into its reverse-insert, so the
@@ -382,7 +424,7 @@ int main(int argc, char **argv) {
                    in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, 0, 0, (uint8_t)((f % 31) == 0), 0 }; }
             Input local = (net_role() == 0) ? in[0] : in[1];   // I only own my own player
             if (net_step(&mysum, f, local, in)) break;
-            MOUSE(f); VIEW(f);
+            MOUSE(f); VIEW(f); SCROLL(f);
             g->tick(in);
             mysum = g->checksum();
             // Test hook (this networked-headless harness only): set CV_NET_DESYNC_AT=<frame>
@@ -408,7 +450,7 @@ int main(int argc, char **argv) {
             if (keys) SCRIPT(f);
             else { in[0] = (Input){ (int8_t)((f / 17) % 3 - 1), 0, 0, 0, (uint8_t)((f % 23) == 0), 0 };
                    in[1] = (Input){ (int8_t)((f / 11) % 3 - 1), 0, 0, 0, (uint8_t)((f % 31) == 0), 0 }; }
-            MOUSE(f); VIEW(f);
+            MOUSE(f); VIEW(f); SCROLL(f);
             g->tick(in);
         }
         g->draw();
@@ -427,7 +469,7 @@ int main(int argc, char **argv) {
         // CV_ESC_AT=<frame> pulses the Esc latch at that frame so the shell's power-off (in the
         // menu) or return-to-console routing is renderable headlessly. Dev hook, --ppm only.
         const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
-        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); if (f == esc_at) g_esc = 1; g->tick(in); }
+        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); SCROLL(f); if (f == esc_at) g_esc = 1; g->tick(in); }
         g->draw();
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
@@ -442,7 +484,7 @@ int main(int argc, char **argv) {
         int n = modearg;
         Input in[2];
         const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
-        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); if (f == esc_at) g_esc = 1; g->tick(in); }
+        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); SCROLL(f); if (f == esc_at) g_esc = 1; g->tick(in); }
         g->draw();
         const char *ramp = " .:-=+*#%@";
         for (int y = 0; y < g_fbh; y += 8) {

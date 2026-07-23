@@ -65,6 +65,9 @@ void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int 
 // camera's orientation; g3d_unrot stays the exact inverse of g3d_rot, which is what objects want.
 void g3d_view(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 void g3d_unrot(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
+// The exact inverse of g3d_view (view orientation -> world). With the camera position added back, it
+// turns a screen pixel + depth into the world point it came from — for world-anchored ground textures.
+void g3d_unview(int32_t *x, int32_t *y, int32_t *z, int ax, int ay, int az);
 
 // The transform, exposed so flat vector shapes ride the SAME pipeline as meshes
 // instead of growing a second one. Anything that can produce three coordinates gets

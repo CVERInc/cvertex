@@ -74,13 +74,27 @@ extern int32_t g_dev_camz;   // 0 = the game decides
 
 // ---- pointer ----------------------------------------------------------------
 // The mouse, in FRAMEBUFFER pixels (g_fb's top-left origin), plus a button bitfield
-// (bit0 = left, bit1 = right). The platform layer fills these; a cartridge that wants a
-// pointer — the box editor — reads them. 🔴 Every existing game and the whole sim ignore
+// (bit0 = left, bit1 = right, bit2 = MIDDLE). The platform layer fills these; a cartridge that
+// wants a pointer — the box editor — reads them. 🔴 Every existing game and the whole sim ignore
 // these, so a pointer no one reads changes no determinism and no checksum: adding it is
 // invisible to everything that came before. In --ppm/--headless the harness can drive them
 // from a scripted track (--mouse), the pointer's answer to --keys.
 extern int     g_mx, g_my;
 extern uint8_t g_mbtn;
+
+// The scroll wheel, ACCUMULATED in notches since a tool last read it: + is up (zoom in), − is
+// down (zoom out). The platform layer adds to it (every notch counts at least ±1, so a trackpad's
+// fine deltas still register); a tool — the editor's Maya-style camera — reads it and resets it to
+// 0 each frame. Like the pointer it is UI state, never in the Input struct, never hashed, so no
+// existing game or sim sees it. In --ppm/--headless the harness drives it from --scroll (u/d/.).
+extern int     g_wheel;
+
+// The number row (1..9, 0) as a ONE-FRAME digit pulse: the digit 0..9 on the frame its key goes
+// down, else -1. The platform layer resets it to -1 each frame and sets it on the keydown edge (a
+// held key can't strobe). Like the pointer and wheel it is UI state — never in the Input struct,
+// never hashed — so no game or deterministic sim sees it unless it deliberately reaches for it. A
+// cartridge can read it for a debug shortcut (e.g. a dev-gated jump); a plain game never touches it.
+extern int     g_digit;
 
 // ---- view toggle ------------------------------------------------------------
 // A one-frame edge latch, exactly the mouse's bargain in a single bit: the platform layer
@@ -91,6 +105,17 @@ extern uint8_t g_mbtn;
 // that came before, same as the pointer. It is deliberately NOT part of the Input struct —
 // Input is the sim contract, and a camera choice is a draw-side comfort setting, not a move.
 extern uint8_t g_view_toggle;
+
+// One-frame edge latch for the '/' key (keycode 44, which is also '?' with shift). The platform
+// pulses it on the keydown edge; a cartridge consumes it to toggle an on-demand help/manual overlay.
+// Same bargain as the view toggle — draw-side comfort, never in the Input struct, never hashed.
+extern uint8_t g_help_toggle;
+
+// One-frame edge latch for a DEBUG-overlay toggle (F3, the Minecraft convention). Same bargain as the
+// view/help latches — the platform pulses it on the keydown edge, a cartridge consumes it to flip an
+// on-demand developer overlay (position/angle/time/weather — the recipe to reproduce a screenshot).
+// Draw-side comfort, never in the Input struct, never hashed: it steers no deterministic sim.
+extern uint8_t g_debug_toggle;
 
 // ---- Esc: the two-stage back button -----------------------------------------
 // A one-frame edge latch, the same bargain as the view toggle: the platform PULSES it on an

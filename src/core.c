@@ -17,8 +17,12 @@ uint8_t  g_fb[MAXFBW * MAXFBH];
 int g_fbw, g_fbh;
 int32_t g_dev_camz;
 int      g_mx, g_my;   // pointer, in framebuffer pixels (top-left origin)
-uint8_t  g_mbtn;       // bit0 = left button, bit1 = right button
+uint8_t  g_mbtn;       // bit0 = left button, bit1 = right button, bit2 = middle button
+int      g_wheel;     // wheel notches accumulated since a tool read it; + = up/zoom-in. UI only, never hashed
+int      g_digit = -1; // number-row pulse: 0..9 the frame its key goes down, else -1. UI only, never hashed
 uint8_t  g_view_toggle;// one-frame edge: platform pulses (Tab / --view), a game consumes it
+uint8_t  g_help_toggle;// one-frame edge: platform pulses ('/' keycode 44), a game toggles its manual
+uint8_t  g_debug_toggle;// one-frame edge: platform pulses (F3), a game toggles its dev debug overlay
 uint8_t  g_esc;        // one-frame edge: platform pulses (Esc / CV_ESC_AT), the shell routes it
 int      g_menu_return;   // platform -> menu: returned from a game, play the insert in reverse (all platforms link)
 int      g_quit;          // menu -> platform: the CRT power-off finished, stop the loop

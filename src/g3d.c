@@ -188,6 +188,22 @@ void g3d_unrot(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
     *px = x; *py = y; *pz = z;
 }
 
+// The exact inverse of g3d_view: view space -> world orientation. g3d_view applies yaw⁻, pitch⁻, roll⁻
+// (in that order); undoing it means the inverse of each, in REVERSE order — roll, pitch, yaw. With the
+// camera position added back afterwards, this turns a screen pixel + its depth into the WORLD point it
+// came from, so a draw pass can lay a world-anchored ground texture that stays put as the camera
+// moves instead of swimming with the screen.
+void g3d_unview(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
+    int32_t x = *px, y = *py, z = *pz, t;
+    int32_t s = SIN(-az), c = COS(-az);                              // roll⁻¹ (undo the roll g3d_view did last, first)
+    t = mul15(x, c) + mul15(y, s);  y = mul15(y, c) - mul15(x, s);  x = t;
+    s = SIN(-ax); c = COS(-ax);                                      // pitch⁻¹
+    t = mul15(y, c) + mul15(z, s);  z = mul15(z, c) - mul15(y, s);  y = t;
+    s = SIN(-ay); c = COS(-ay);                                      // yaw⁻¹
+    t = mul15(x, c) - mul15(z, s);  z = mul15(z, c) + mul15(x, s);  x = t;
+    *px = x; *py = y; *pz = z;
+}
+
 #define MAXV 2048
 #define MAXT 4096
 
