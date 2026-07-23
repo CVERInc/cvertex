@@ -10,7 +10,7 @@ assets/local/
 src/local/
 cvertex.app
 cvertex.exe
-src/games.gen.h
+gen/
 cvertex.pdb
 
 # The box editor's default export target (games/editor.c). A generated mesh, not engine.

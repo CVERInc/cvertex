@@ -272,6 +272,7 @@ static void build_carts(void) {
     build_template();
     ramp(8,  0xFF12151E);                             // 8..15  connector (near-black metal)
     ramp_gloss(16, 0xFF9A9488);                       // 16..23 body — warm moulded grey with a white specular hotspot so the sheen crawls
+    ramp(232, 0xFF9A9488);                             // 232..239 body EDGE — same grey, but a PLAIN ramp: the thick side wall (bevel ring) still catches a moving sheen as it turns, yet its top shade tops out at "lit gloss", never blooming to the specular white that made the slab read as a hollow lit box when it turned edge-on. Only the flat front/back keep the ramp_gloss hotspot.
     // 24..71 six neon label ramps, and 176..223 the glow each throws on its bezel — all FLAT, because
     // both are the screen: one is the tube, the other is what the tube lights up. See ramp_flat.
     for (int c = 0; c < 6; c++) ramp_flat(24 + c * 8, NEON_RGB[c], LABEL_M);
@@ -294,7 +295,8 @@ static void build_carts(void) {
             else if (t >= 42 && t < 90)   ci = 160;                          // screen bezel (neutral dark plastic — frames any neon screen)
             else if (t >= 90 && t < 138)  ci = 8;                            // corner screws (same dark metal)
             else if (t >= 138 && t < 162) ci = 152;                          // brass badge + contacts
-            else                          ci = 16;                           // body + bevel ring
+            else if (t >= 12 && t < 28)   ci = 232;                          // the slab's THICKNESS (bevel ring): matte body, no specular bloom — a solid edge, not a lit hollow box, when it turns edge-on
+            else                          ci = 16;                           // flat front/back faces + front chamfer — glossy, the sheen crawls
             cart_t[i][t].ci = ci;
         }
         // The rim the screen shines on: the bezel frame's whole INNER wall (tris 58..73). Without
@@ -793,12 +795,6 @@ static void place_cart(int i, int sel, uint32_t frame, int32_t scroll, int flip,
     int front = (i == sel);
     uint32_t p = frame + (uint32_t)i * 137;
     int amp = front ? 48 : 16;   // the selected cart tilts more so its edges/top catch light — reads as a held object
-    // 🔴 Fade the idle wobble to nothing AT edge-on (flip≈512, 90°). Exactly edge-on, the flat silver
-    // face-fans project to zero-width lines and vanish cleanly; but the few-degree wobble tips them just
-    // off 90°, and a borderline face catches the specular top-shade and slices through the thin edge as a
-    // white sliver ("厚度破圖"). Easing the wobble out near edge-on lets the faces sit truly flush, no slivers.
-    if (front) { int fd = flip - 512; if (fd < 0) fd = -fd;
-                 if (fd < 96) amp = 0; else if (fd < 256) amp = amp * (fd - 96) / 160; }
     int ax = (int)(((int64_t)amp * g_sin[(p * 168 / 100) & 1023]) >> 15);
     int ay = (int)(((int64_t)(amp + 6) * g_sin[((p * 122 / 100) + 212) & 1023]) >> 15);
     int az = (int)(((int64_t)(amp - 6) * g_sin[((p * 217 / 100) + 342) & 1023]) >> 15);

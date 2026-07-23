@@ -4,8 +4,8 @@
 # Windows machine and double-click. (zig: brew install zig)
 set -e
 OUT=${OUT:-cvertex.exe}
-sh tools/gen-games.sh          # scan games/*.c -> src/games.gen.h (the cartridge roster)
-zig cc -target x86_64-windows-gnu -std=c11 -O2 -Isrc -Wl,--subsystem,windows \
+sh tools/gen-games.sh          # scan games/*.c -> gen/games.gen.h (the cartridge roster)
+zig cc -target x86_64-windows-gnu -std=c11 -O2 -Igen -Isrc -Wl,--subsystem,windows \
   -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/text.c src/net.c src/win.c games/*.c \
   -lgdi32 -lwinmm -luser32 -lws2_32
 # -mwindows = the GUI subsystem: double-clicking opens just the game window, no black console.
