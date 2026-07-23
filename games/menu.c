@@ -36,10 +36,15 @@ static uint32_t g_frame;
 #define BOOT_LEN 104          // frames the "CVERTEX" fly-in runs before the shelf takes over
 #define FLY      48           // frames one letter spends in flight
 #define STAG      7           // frames between successive letters launching
+#define MAXCART 48            // shelf capacity (static cart-mesh arrays); headroom over the current roster
 
 static const Game *const *g_list;
 static int g_n;
-void menu_populate(const Game *const *list, int n) { g_list = list; g_n = n; }
+// Clamp the shelf to what the static cart-mesh arrays can hold. Nav wraps on g_n and the render caps
+// at MAXCART; if they disagree (roster > MAXCART) the extra carts are selectable but never drawn — an
+// invisible-but-enterable "ghost" cart at the end. Clamping HERE keeps nav and render on the same count,
+// so a ghost can't exist; MAXCART itself has headroom so nothing is dropped in practice.
+void menu_populate(const Game *const *list, int n) { g_list = list; g_n = n < MAXCART ? n : MAXCART; }
 
 #define INS_LEN 140          // total P_INSERT frames: a long, admirable dive + a seated HOLD beat
 #define SEAT    44           // frames the seated HOLD lasts — also = frames before the end the cart hits home,
@@ -48,7 +53,6 @@ void menu_populate(const Game *const *list, int n) { g_list = list; g_n = n; }
 #define POFF_V   16          // CRT power-off: frames the picture squashes vertically to a bright line
 #define POFF_H   24          // ...then the line shrinks horizontally to a dot by here...
 #define POFF_LEN 32          // ...then the dot fades to black; the platform quits when g_poff hits this
-#define MAXCART 32
 
 // ---- the cartridge mesh: a chamfered slab, not a cube — and LANDSCAPE, lying on its long edge the
 // way a Famicom/Game Boy cart does, wider than it is tall. Eight-sided cross-section (corners cut at
@@ -749,6 +753,8 @@ static void tick(const Input in[2]) {
     if (up && !g_prev_up) { g_fliptarget = g_fliptarget ? 0 : 1024; beep(4, 66, 70); }
     g_prev_up = up;
     g_flip += (g_fliptarget - g_flip) >> 3;
+    { static int cf = -2; if (cf == -2) { const char *e = getenv("CVX_FLIP"); cf = e ? atoi(e) : -1; }
+      if (cf >= 0) g_fliptarget = g_flip = cf; }   // dev: pose the flip angle (0..1024; 512 = edge-on) for a --ppm shot
     // Down PLUNGES the cart down into the console — the insert. (Space used to do this; it's now the
     // inspect toy, and Down is the honest gesture: you push the cart DOWN into the slot.)
     if ((in[0].y < 0 || in[1].y < 0) && g_n) { g_phase = P_INSERT; g_ins = INS_LEN; beep(3, 40, 200); }
@@ -787,6 +793,12 @@ static void place_cart(int i, int sel, uint32_t frame, int32_t scroll, int flip,
     int front = (i == sel);
     uint32_t p = frame + (uint32_t)i * 137;
     int amp = front ? 48 : 16;   // the selected cart tilts more so its edges/top catch light — reads as a held object
+    // 🔴 Fade the idle wobble to nothing AT edge-on (flip≈512, 90°). Exactly edge-on, the flat silver
+    // face-fans project to zero-width lines and vanish cleanly; but the few-degree wobble tips them just
+    // off 90°, and a borderline face catches the specular top-shade and slices through the thin edge as a
+    // white sliver ("厚度破圖"). Easing the wobble out near edge-on lets the faces sit truly flush, no slivers.
+    if (front) { int fd = flip - 512; if (fd < 0) fd = -fd;
+                 if (fd < 96) amp = 0; else if (fd < 256) amp = amp * (fd - 96) / 160; }
     int ax = (int)(((int64_t)amp * g_sin[(p * 168 / 100) & 1023]) >> 15);
     int ay = (int)(((int64_t)(amp + 6) * g_sin[((p * 122 / 100) + 212) & 1023]) >> 15);
     int az = (int)(((int64_t)(amp - 6) * g_sin[((p * 217 / 100) + 342) & 1023]) >> 15);
