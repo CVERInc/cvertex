@@ -15,6 +15,9 @@ void fx_bloom_set(int thresh, int radius, int strength) {
     s_thresh = thresh; s_radius = radius; s_strength = strength;
 }
 
+static int s_dof_str;          // depth-of-field aperture gain, 0 = off
+void fx_dof_set(int strength) { s_dof_str = strength; }
+
 void fx_bloom_emissive(const uint8_t mask[256]) {
     if (!mask) { memset(s_emis, 0, sizeof s_emis); s_have_emis = 0; return; }
     memcpy(s_emis, mask, sizeof s_emis);
@@ -88,5 +91,28 @@ void fx_bloom(uint32_t *rgba, int w, int h) {
         int b = (int)( o        & 255) + (int)((( glow        & 255) * s_strength) >> 8);
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
         rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    }
+    // 🔭 DEPTH OF FIELD, last — a camera lens, the thing that reads a blocky world as a MINIATURE (the
+    // whole "world in your palm"). g_zb holds inverse depth (w ≈ 1/z, 0 = sky), and a thin lens's circle
+    // of confusion is ∝ |1/z − 1/focus| — which is exactly |w − focus_w|, so the blur amount falls right
+    // out of the depth buffer with no division. Autofocus on the centre pixel: whatever you look AT is
+    // sharp, everything nearer or farther melts. A palette PPU has no per-pixel depth to do this with.
+    if (s_dof_str > 0) {
+        uint32_t fw = g_zb[(size_t)(h / 2) * w + (w / 2)];    // focus depth = what the crosshair rests on
+        for (int i = 0; i < px; i++) s_a[i] = rgba[i] & 0x00FFFFFFu;   // a blurred copy of the whole frame…
+        box_pass(s_b, s_a, w, h, 3, 1);
+        box_pass(s_a, s_b, w, h, 3, 0);
+        box_pass(s_b, s_a, w, h, 3, 1);
+        box_pass(s_a, s_b, w, h, 3, 0);
+        for (int i = 0; i < px; i++) {
+            int coc = (int)g_zb[i] - (int)fw; if (coc < 0) coc = -coc;   // distance from the focal plane, in inverse-depth
+            int m = (coc * s_dof_str) >> 10; if (m > 256) m = 256;       // …blended in by how far out of focus this pixel is
+            if (!m) continue;
+            uint32_t o = rgba[i], bl = s_a[i];
+            int r = (int)((o >> 16) & 255) + ((((int)((bl >> 16) & 255) - (int)((o >> 16) & 255)) * m) >> 8);
+            int g = (int)((o >>  8) & 255) + ((((int)((bl >>  8) & 255) - (int)((o >>  8) & 255)) * m) >> 8);
+            int b = (int)( o        & 255) + ((((int)( bl        & 255) - (int)( o        & 255)) * m) >> 8);
+            rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+        }
     }
 }

@@ -30,4 +30,10 @@ void fx_bloom_set(int thresh, int radius, int strength);
 // palette, not a float. The platform clears it with the socket on every game switch.
 void fx_bloom_emissive(const uint8_t mask[256]);
 
+// Depth of field. strength is the aperture gain (0 = OFF). It reads the engine depth buffer (g_zb)
+// directly and autofocuses on the centre pixel, so whatever the camera looks at stays sharp while
+// everything nearer or farther blurs — the lens trick that reads a blocky world as a held miniature.
+// No per-frame setter needed beyond this; focus is found from the depth buffer each present.
+void fx_dof_set(int strength);
+
 #endif
