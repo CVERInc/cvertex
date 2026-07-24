@@ -36,4 +36,10 @@ void fx_bloom_emissive(const uint8_t mask[256]);
 // No per-frame setter needed beyond this; focus is found from the depth buffer each present.
 void fx_dof_set(int strength);
 
+// CRT phosphor blend — reproduces a shadow-mask CRT's limited horizontal bandwidth (the sideways
+// beam smear that melted dither dots into smooth gradients), and ONLY that: no scanlines, no mask,
+// no dimming. strength is the blend amount 0..256 (0 = OFF). Runs last, as the display stage. The
+// framebuffer stays palette-indexed; this melts the dither in the RGBA output, not in the palette.
+void fx_crt_set(int strength);
+
 #endif

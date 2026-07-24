@@ -18,6 +18,9 @@ void fx_bloom_set(int thresh, int radius, int strength) {
 static int s_dof_str;          // depth-of-field aperture gain, 0 = off
 void fx_dof_set(int strength) { s_dof_str = strength; }
 
+static int s_crt_str;          // CRT phosphor-blend amount (0..256), 0 = off
+void fx_crt_set(int strength) { s_crt_str = strength; }
+
 void fx_bloom_emissive(const uint8_t mask[256]) {
     if (!mask) { memset(s_emis, 0, sizeof s_emis); s_have_emis = 0; return; }
     memcpy(s_emis, mask, sizeof s_emis);
@@ -112,6 +115,25 @@ void fx_bloom(uint32_t *rgba, int w, int h) {
             int r = (int)((o >> 16) & 255) + ((((int)((bl >> 16) & 255) - (int)((o >> 16) & 255)) * m) >> 8);
             int g = (int)((o >>  8) & 255) + ((((int)((bl >>  8) & 255) - (int)((o >>  8) & 255)) * m) >> 8);
             int b = (int)( o        & 255) + ((((int)( bl        & 255) - (int)( o        & 255)) * m) >> 8);
+            rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+        }
+    }
+    // 📺 CRT PHOSPHOR BLEND — the monitor, last of all. A shadow-mask CRT had a limited HORIZONTAL
+    // bandwidth: the beam smeared each scanline sideways, so adjacent dither dots melted into a
+    // continuous gradient — which is why 32 dithered colours read as smooth skin on a CRT and as raw
+    // stipple on an LCD. We reproduce only that (the "essence", no scanlines, no dimming): a wide
+    // horizontal blur, a gentle vertical one (the scan axis stayed sharper), blended in by strength.
+    // Big shape edges survive — their contrast is far above the dither's — so the faceted look holds;
+    // only the high-frequency dither is averaged away. Palette stays pure: this is display, not paint.
+    if (s_crt_str > 0) {
+        for (int i = 0; i < px; i++) s_a[i] = rgba[i] & 0x00FFFFFFu;
+        box_pass(s_b, s_a, w, h, 2, 1);   // horizontal smear — the CRT's soft axis, where dither dissolves
+        box_pass(s_a, s_b, w, h, 1, 0);   // vertical — gentler, the scanline axis a real CRT kept crisp
+        for (int i = 0; i < px; i++) {
+            uint32_t o = rgba[i], bl = s_a[i];
+            int r = (int)((o >> 16) & 255) + ((((int)((bl >> 16) & 255) - (int)((o >> 16) & 255)) * s_crt_str) >> 8);
+            int g = (int)((o >>  8) & 255) + ((((int)((bl >>  8) & 255) - (int)((o >>  8) & 255)) * s_crt_str) >> 8);
+            int b = (int)( o        & 255) + ((((int)( bl        & 255) - (int)( o        & 255)) * s_crt_str) >> 8);
             rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
         }
     }
