@@ -28,6 +28,13 @@ void fb_resize(int w, int h);
 extern uint8_t  g_fb[MAXFBW * MAXFBH];
 extern uint32_t g_pal[256];   // 0xAARRGGBB
 
+// The light-chip socket. If a cartridge sets this in init(), the platform runs it on the
+// expanded RGBA buffer every present — after the palette lookup, after fb_checksum — so it
+// paints screen-space effects (bloom, etc.) that a palette compositor can't. Default NULL =
+// the base console pays nothing. The platform resets it to NULL on every game switch, exactly
+// like g3d_light: a cartridge's post-processing is content and must not follow you out. See fx.h.
+extern void (*g_present_fx)(uint32_t *rgba, int w, int h);
+
 // Sine lookup table. The synth uses it for waveforms, 3D uses it for rotation — one
 // table, because that's the same thing underneath.
 // 🔴 It lives in core, not synth: sharing it is a dividend, but ownership has to be

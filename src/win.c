@@ -24,6 +24,7 @@ static HWND     g_hwnd;
 // ---- display: palette indices -> RGB, stretched into the client area, pixels kept sharp -----
 static void blit(HDC hdc) {
     for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
+    if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // the light chip, if a cartridge armed it
     BITMAPINFO bi;
     memset(&bi, 0, sizeof bi);
     bi.bmiHeader.biSize = sizeof bi.bmiHeader;
@@ -254,6 +255,7 @@ int main(int argc, char **argv) {
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);
             g3d_light(0, 0, 0);   // and back to the headlamp — a cartridge's light is content, like its song
+            g_present_fx = 0;     // and eject the light chip — post-processing is content too, must not follow out
             // Menu-driven co-op (g_coop: 1 HOST / 2 JOIN), the command-line-free twin of --host/--join.
             // 🔴 SEAM (same as mac.c): JOIN has no on-screen IP entry yet, so it targets 127.0.0.1 —
             // fine for a two-window test on one box; remote co-op still needs the --join <ip> flag.

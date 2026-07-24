@@ -39,6 +39,7 @@ void fb_resize(int w, int h) {
     g_fbw = w; g_fbh = h;
 }
 uint32_t g_pal[256];
+void (*g_present_fx)(uint32_t *rgba, int w, int h);   // the light-chip socket; NULL = base console. See core.h.
 
 void fb_clear(uint8_t ci) {
     for (int i = 0; i < g_fbw * g_fbh; i++) g_fb[i] = ci;

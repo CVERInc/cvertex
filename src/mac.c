@@ -37,6 +37,7 @@ static int      g_running;   // see synth.c's 16KB lesson: assign the initial va
 static void fbview_draw(id self, SEL _cmd, CGRect dirty) {
     (void)self; (void)_cmd; (void)dirty;
     for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
+    if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // the light chip, if a cartridge armed it
 
     id nsctx = MSG(id)(CLS_("NSGraphicsContext"), SEL_("currentContext"));
     if (!nsctx) return;
@@ -474,9 +475,11 @@ int main(int argc, char **argv) {
         const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
         for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); SCROLL(f); if (f == esc_at) g_esc = 1; g->tick(in); }
         g->draw();
+        for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
+        if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // screenshots see exactly what the window sees
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
-            uint32_t c = g_pal[g_fb[i]];
+            uint32_t c = g_rgba[i];
             putchar((c >> 16) & 255); putchar((c >> 8) & 255); putchar(c & 255);
         }
         return 0;
@@ -614,6 +617,7 @@ int main(int argc, char **argv) {
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);
             g3d_light(0, 0, 0);   // and back to the headlamp — a cartridge's light is content, like its song
+            g_present_fx = 0;     // and eject the light chip — post-processing is content too, must not follow out
             // CO-OP chosen in the OPTIONS panel (g_coop: 1 HOST / 2 JOIN): stand up the lockstep net
             // now, as the cart plugs in — the menu-driven equivalent of the --host/--join flags, so a
             // player never has to touch the command line. HOST blocks here until a peer joins, exactly

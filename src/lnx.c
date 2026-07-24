@@ -62,13 +62,17 @@ static void make_image(void) {
 // ---- display: palette indices -> RGB, nearest-neighbour scaled into the window, pixels kept sharp.
 // g_pal is 0xAARRGGBB; the X visual is usually a BGRA/32 TrueColor, so we recompose each channel into
 // the visual's own masks instead of assuming a layout.
+static uint32_t g_rgba[MAXFBW * MAXFBH];   // 0xAARRGGBB at framebuffer res, so the light chip has a full-res canvas before the window scale
 static void present(void) {
+    int N = g_fbw * g_fbh;
+    for (int i = 0; i < N; i++) g_rgba[i] = g_pal[g_fb[i]];
+    if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // the light chip, if a cartridge armed it — before the scale
     for (int y = 0; y < g_win_h; y++) {
         int sy = y * g_fbh / g_win_h;
-        const uint8_t *srow = &g_fb[sy * g_fbw];
+        const uint32_t *srow = &g_rgba[sy * g_fbw];
         uint32_t *drow = &g_px[(size_t)y * g_win_w];
         for (int x = 0; x < g_win_w; x++) {
-            uint32_t c = g_pal[srow[x * g_fbw / g_win_w]];
+            uint32_t c = srow[x * g_fbw / g_win_w];
             drow[x] = (((c >> 16) & 0xFF) << g_rs) | (((c >> 8) & 0xFF) << g_gs) | ((c & 0xFF) << g_bs);
         }
     }
@@ -284,9 +288,11 @@ int main(int argc, char **argv) {
         Input in[2];
         for (int f = 0; f < n; f++) { SCRIPT(f); g->tick(in); }
         g->draw();
+        for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
+        if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // screenshots see exactly what the window sees
         printf("P6\n%d %d\n255\n", g_fbw, g_fbh);
         for (int i = 0; i < g_fbw * g_fbh; i++) {
-            uint32_t c = g_pal[g_fb[i]];
+            uint32_t c = g_rgba[i];
             putchar((c >> 16) & 255); putchar((c >> 8) & 255); putchar(c & 255);
         }
         return 0;
@@ -377,6 +383,7 @@ int main(int argc, char **argv) {
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);   // silence the old game before the new one speaks; the platform's job
             g3d_light(0, 0, 0);       // and back to the headlamp — a cartridge's light is content, like its song
+            g_present_fx = 0;         // and eject the light chip — post-processing is content too, must not follow out
             // Menu-driven co-op (g_coop: 1 HOST / 2 JOIN), the command-line-free twin of --host/--join.
             // 🔴 SEAM (same as mac.c): JOIN targets 127.0.0.1 — a two-window test on one box; remote
             // co-op still needs a --join <ip> flag.

@@ -7,7 +7,7 @@ sh tools/gen-games.sh          # scan games/*.c -> gen/games.gen.h (the cartridg
 # searches mac.c's own dir first) can never shadow a consumer's roster with this repo's own.
 clang -std=c11 -Os -fno-stack-protector -fomit-frame-pointer \
   -ffunction-sections -fdata-sections -Igen -Isrc \
-  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/text.c src/net.c src/mac.c games/*.c \
+  -o "$OUT" src/core.c src/g3d.c src/shape.c src/synth.c src/text.c src/net.c src/fx.c src/mac.c games/*.c \
   -framework Cocoa -framework CoreGraphics -framework AudioToolbox \
   -Wl,-dead_strip
 strip -x "$OUT"
