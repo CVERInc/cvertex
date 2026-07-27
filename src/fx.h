@@ -38,8 +38,11 @@ void fx_dof_set(int strength);
 
 // CRT phosphor blend — reproduces a shadow-mask CRT's limited horizontal bandwidth (the sideways
 // beam smear that melted dither dots into smooth gradients), and ONLY that: no scanlines, no mask,
-// no dimming. strength is the blend amount 0..256 (0 = OFF). Runs last, as the display stage. The
-// framebuffer stays palette-indexed; this melts the dither in the RGBA output, not in the palette.
-void fx_crt_set(int strength);
+// no dimming. strength is the HORIZONTAL melt amount 0..256 (0 = OFF) — vertical stays razor-sharp,
+// so it reads as a CRT and not as near-sightedness. scanline (0..~64) adds a brightness-neutral row
+// structure (even rows lift, odd rows drop by the same step) — the fine-detail cue a pure blur loses.
+// Runs last, as the display stage. The framebuffer stays palette-indexed; this melts the dither in
+// the RGBA output, not in the palette.
+void fx_crt_set(int strength, int scanline);
 
 #endif

@@ -18,8 +18,9 @@ void fx_bloom_set(int thresh, int radius, int strength) {
 static int s_dof_str;          // depth-of-field aperture gain, 0 = off
 void fx_dof_set(int strength) { s_dof_str = strength; }
 
-static int s_crt_str;          // CRT phosphor-blend amount (0..256), 0 = off
-void fx_crt_set(int strength) { s_crt_str = strength; }
+static int s_crt_str;          // CRT horizontal phosphor-melt amount (0..256), 0 = off
+static int s_crt_line;         // CRT scanline structure amount (0..~64), 0 = none — brightness-neutral
+void fx_crt_set(int strength, int scanline) { s_crt_str = strength; s_crt_line = scanline; }
 
 void fx_bloom_emissive(const uint8_t mask[256]) {
     if (!mask) { memset(s_emis, 0, sizeof s_emis); s_have_emis = 0; return; }
@@ -126,15 +127,36 @@ void fx_bloom(uint32_t *rgba, int w, int h) {
     // Big shape edges survive — their contrast is far above the dither's — so the faceted look holds;
     // only the high-frequency dither is averaged away. Palette stays pure: this is display, not paint.
     if (s_crt_str > 0) {
+        // Melt is HORIZONTAL ONLY. A CRT's beam smears sideways along the scanline but the lines
+        // themselves stay distinct — so the vertical axis must stay razor-sharp. Blurring both axes
+        // (the first cut did) reads as plain near-sightedness; blurring only the soft axis reads as a CRT.
         for (int i = 0; i < px; i++) s_a[i] = rgba[i] & 0x00FFFFFFu;
-        box_pass(s_b, s_a, w, h, 2, 1);   // horizontal smear — the CRT's soft axis, where dither dissolves
-        box_pass(s_a, s_b, w, h, 1, 0);   // vertical — gentler, the scanline axis a real CRT kept crisp
+        box_pass(s_b, s_a, w, h, 2, 1);   // horizontal smear only — dither dissolves along the line; verticals kept
         for (int i = 0; i < px; i++) {
-            uint32_t o = rgba[i], bl = s_a[i];
+            uint32_t o = rgba[i], bl = s_b[i];
             int r = (int)((o >> 16) & 255) + ((((int)((bl >> 16) & 255) - (int)((o >> 16) & 255)) * s_crt_str) >> 8);
             int g = (int)((o >>  8) & 255) + ((((int)((bl >>  8) & 255) - (int)((o >>  8) & 255)) * s_crt_str) >> 8);
             int b = (int)( o        & 255) + ((((int)( bl        & 255) - (int)( o        & 255)) * s_crt_str) >> 8);
             rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+        }
+        // A whisper of scanline STRUCTURE — the thing that makes a CRT read as detailed, not just soft:
+        // it trades resolution for structure the eye reads as fine detail. Brightness-NEUTRAL: even rows
+        // lift, odd rows drop by the same step, so the average is unchanged (no dimming) — the line pattern
+        // is added, not subtracted. This is the part a pure blur throws away, leaving the "nearsighted" feel.
+        if (s_crt_line > 0) {
+            for (int y = 0; y < h; y++) {
+                int k = (y & 1) ? -s_crt_line : s_crt_line;   // ±step, alternating rows → net neutral over a pair
+                uint32_t *row = rgba + (size_t)y * w;
+                for (int x = 0; x < w; x++) {
+                    uint32_t o = row[x];
+                    int r = (int)((o >> 16) & 255) + (((int)((o >> 16) & 255) * k) >> 8);
+                    int g = (int)((o >>  8) & 255) + (((int)((o >>  8) & 255) * k) >> 8);
+                    int b = (int)( o        & 255) + (((int)( o        & 255) * k) >> 8);
+                    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+                    if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+                    row[x] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+                }
+            }
         }
     }
 }
