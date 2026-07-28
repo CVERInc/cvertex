@@ -40,7 +40,7 @@ extern void (*g_present_fx)(uint32_t *rgba, int w, int h);
 // 🔴 It lives in core, not synth: sharing it is a dividend, but ownership has to be
 // explicit, or 3D silently depends on audio's init order (learned the hard way:
 // --dump skipped synth_init, and the whole cube collapsed to a point).
-extern int16_t g_sin[1024];   // Q15: ±32767 = ±1.0
+extern const int16_t g_sin[1024];   // Q15: ±32767 = ±1.0
 void tables_init(void);       // called by sim_init; the synth depends on it too
 
 // Input: one struct per character. What the platform layer hands a game, and the only way

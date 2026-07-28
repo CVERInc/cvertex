@@ -3,7 +3,6 @@
 // never reads synth state → determinism stays uncontaminated.
 #include "synth.h"
 #include "core.h"
-#include <math.h>
 
 Instr g_instr[NINSTR];
 
@@ -101,10 +100,33 @@ void synth_init(void) {
     g_instr[7] = (Instr){ W_SINE,   0,  0,    800, 20000,    0,12000, 128 }; // pure tone — decays to silence (s=0), so a one-shot (a game-over sting, a distant hoot) fades instead of droning forever with no note-off
 }
 
+// 16.16 phase increment per MIDI note, BAKED. The formula is 440 Hz x 2^((midi-69)/12) scaled to the
+// sample rate; these are exactly the values that expression produced, frozen at build time. Baking it
+// buys two things for 512 bytes: the last call into libm disappears, so the whole program links against
+// nothing but libc; and every machine now plays the same pitches rather than whatever its own pow()
+// happened to round to. A4 (note 69) is 653, which is 440 x 65536 / 44100 as it should be.
+static const uint32_t NOTE_STEP[128] = {
+         12,     12,     13,     14,     15,     16,     17,     18,
+         19,     20,     21,     22,     24,     25,     27,     28,
+         30,     32,     34,     36,     38,     40,     43,     45,
+         48,     51,     54,     57,     61,     64,     68,     72,
+         77,     81,     86,     91,     97,    102,    109,    115,
+        122,    129,    137,    145,    154,    163,    173,    183,
+        194,    205,    218,    231,    244,    259,    274,    291,
+        308,    326,    346,    366,    388,    411,    436,    462,
+        489,    518,    549,    582,    617,    653,    692,    733,
+        777,    823,    872,    924,    979,   1037,   1099,   1165,
+       1234,   1307,   1385,   1467,   1555,   1647,   1745,   1849,
+       1959,   2075,   2199,   2330,   2468,   2615,   2771,   2935,
+       3110,   3295,   3491,   3698,   3918,   4151,   4398,   4660,
+       4937,   5230,   5542,   5871,   6220,   6590,   6982,   7397,
+       7837,   8303,   8797,   9320,   9874,  10461,  11084,  11743,
+      12441,  13181,  13965,  14795,  15675,  16607,  17594,  18641
+};
+
 static uint32_t note_step(int midi) {
-    // frequency = 440 × 2^((midi-69)/12), converted to a 16.16 phase increment
-    float hz = 440.f * powf(2.f, (midi - 69) / 12.f);
-    return (uint32_t)(hz * 65536.f / SR);
+    if (midi < 0) midi = 0; if (midi > 127) midi = 127;
+    return NOTE_STEP[midi];
 }
 
 void synth_note(int ch, int instr, int midi, int vel) {
