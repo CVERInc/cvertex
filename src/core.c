@@ -205,6 +205,11 @@ void zb_clear(void) {
 // Scanline fill with a per-pixel depth test. Only 1/z is linear in screen space, so
 // that's what's interpolated — the alternative is a depth test that's subtly wrong in
 // exactly the places perspective matters.
+// Set to 0 to get the older, leakier span rule back for one measurement. A cartridge's self-checks flip
+// it to prove the defect the two notes below describe actually reproduces — a check that has never been
+// shown to go red is not a check. Nothing in a real frame ever touches it.
+int g_tri_watertight = 1;
+
 void tri_fill_z(const int16_t *xy, const uint32_t *w, uint8_t ci) {
     int x0 = xy[0], y0 = xy[1], x1 = xy[2], y1 = xy[3], x2 = xy[4], y2 = xy[5];
     int miny = y0 < y1 ? (y0 < y2 ? y0 : y2) : (y1 < y2 ? y1 : y2);
@@ -221,19 +226,51 @@ void tri_fill_z(const int16_t *xy, const uint32_t *w, uint8_t ci) {
         int xs[3], ws_i = 0;
         int32_t xl = 0, xr = 0;
         // Find this scanline's span from the three edges.
-        int cnt = 0; int px[3];
+        int cnt = 0; int px[3], pxhi[3];
         int vx[3] = { x0, x1, x2 }, vy[3] = { y0, y1, y2 };
         for (int e = 0; e < 3 && cnt < 2; e++) {
             int a = e, b = (e + 1) % 3;
-            int ya = vy[a], yb = vy[b];
-            if (ya == yb) continue;
-            int lo = ya < yb ? ya : yb, hi = ya < yb ? yb : ya;
-            if (y < lo || y >= hi) continue;
-            px[cnt++] = vx[a] + (int)((int32_t)(y - ya) * (vx[b] - vx[a]) / (yb - ya));
+            // 🔴 A SHARED EDGE MUST BE THE SAME EDGE TO BOTH OF ITS TRIANGLES, AND A SPAN MUST CONTAIN
+            // WHAT IT COVERS. The old line was `vx[a] + (y-ya)*(vx[b]-vx[a])/(yb-ya)` — one expression
+            // with two separate leaks in it, and together they let the BACKGROUND through a surface that
+            // is meant to be solid. Along a receding seam that comes out as a dotted bright line, which
+            // is easy to mistake for a shading artefact of the two faces' brightness. It is not shading:
+            // it is a hole.
+            //   ① Integer division truncates toward ZERO, not down. Two triangles that share an edge meet
+            //      it in opposite directions, so on a scanline where the true crossing is not a whole
+            //      pixel one of them rounds up and the other rounds down, and the pair can miss each
+            //      other. Walking every edge from its TOP vertex, and flooring rather than truncating,
+            //      makes both do bit-identical arithmetic on the edge they share.
+            //   ② The span was floor on the LEFT and floor on the RIGHT — conservative on one side and
+            //      a pixel short on the other. Keeping the ceiling as well and using it for the right end
+            //      gives the smallest whole span that CONTAINS the true one, so neighbours may overlap by
+            //      a pixel — which the depth test absorbs — and can never part.
+            // 🔴 Not the same thing as testing the barycentrics for exact coverage, which was tried and
+            // measured WORSE: a triangle thinner than a pixel then contains no sample point at all and
+            // disappears, and a floor at a grazing angle is made of exactly those — measured over two
+            // dozen views it left MORE than twice the holes of the rule it was replacing. Over the twelve
+            // views the cartridge's own check uses: 597 pinholes as this shipped, 150 with this.
+            if (g_tri_watertight) {
+                if (vy[a] > vy[b]) { int t = a; a = b; b = t; }
+                int ya = vy[a], yb = vy[b];
+                if (ya == yb) continue;
+                if (y < ya || y >= yb) continue;
+                int32_t num = (int32_t)(y - ya) * (vx[b] - vx[a]), den = yb - ya;
+                int q = (int)(num / den), rem = (int)(num % den);
+                px[cnt]   = vx[a] + (rem < 0 ? q - 1 : q);   // floor
+                pxhi[cnt] = vx[a] + (rem > 0 ? q + 1 : q);   // ceiling
+            } else {                                          // the rule this shipped with, for the control
+                int ya = vy[a], yb = vy[b];
+                if (ya == yb) continue;
+                int lo = ya < yb ? ya : yb, hi = ya < yb ? yb : ya;
+                if (y < lo || y >= hi) continue;
+                px[cnt] = pxhi[cnt] = vx[a] + (int)((int32_t)(y - ya) * (vx[b] - vx[a]) / (yb - ya));
+            }
+            cnt++;
         }
         if (cnt < 2) continue;
-        xl = px[0] < px[1] ? px[0] : px[1];
-        xr = px[0] < px[1] ? px[1] : px[0];
+        xl = px[0]   < px[1]   ? px[0]   : px[1];
+        xr = pxhi[0] > pxhi[1] ? pxhi[0] : pxhi[1];
         if (xr < 0 || xl > g_fbw - 1) continue;
         if (xl < 0) xl = 0;
         if (xr > g_fbw - 1) xr = g_fbw - 1;

@@ -162,5 +162,6 @@ void zb_clear(void);
 
 // A depth-tested triangle. p = x,y screen and w = (1<<30)/z per vertex.
 void tri_fill_z(const int16_t *xy, const uint32_t *w, uint8_t ci);
+extern int g_tri_watertight;   /* 0 = the old, leakier span rule; self-check control only */
 
 #endif
