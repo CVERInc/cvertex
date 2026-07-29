@@ -30,6 +30,17 @@ void fx_bloom_set(int thresh, int radius, int strength);
 // palette, not a float. The platform clears it with the socket on every game switch.
 void fx_bloom_emissive(const uint8_t mask[256]);
 
+// How the additive composite lands when the light overflows 8 bits. OFF (the default, and what every
+// bloom does) clamps each channel on its own: the brightest channel pins at 255 first and the others
+// catch up, so a hot core bleaches to white while its halo keeps the emitter's colour. On a WARM
+// emitter that is exactly right — a white-hot core in an orange glow is what an overexposed sun looks
+// like. On a COOL emitter whose blue is ALREADY at 255 it is a defect: the core loses its colour
+// entirely while the halo, which never clipped, keeps it, and the two meet in a hard coloured ring.
+// ON scales all three channels by the same factor when any would clip, so the composite gets brighter
+// without ever changing hue — no ring, and no bleached core either. Same code, opposite virtues; which
+// one a game wants is a look decision, so it is a switch and not a fix.
+void fx_bloom_huelock(int on);
+
 // Depth of field. strength is the aperture gain (0 = OFF). It reads the engine depth buffer (g_zb)
 // directly and autofocuses on the centre pixel, so whatever the camera looks at stays sharp while
 // everything nearer or farther blurs — the lens trick that reads a blocky world as a held miniature.

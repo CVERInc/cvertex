@@ -10,6 +10,9 @@ static int s_strength = 150;   // additive gain, 0..256
 
 static uint8_t s_emis[256];    // per-index glow strength, 0 = never blooms. Set by fx_bloom_emissive.
 static int     s_have_emis;    // any index marked? — lets a mask-less game fall back to luminance
+static int     s_huelock;      // clamp the overflow by scaling all three channels together (see fx.h)
+
+void fx_bloom_huelock(int on) { s_huelock = on ? 1 : 0; }
 
 void fx_bloom_set(int thresh, int radius, int strength) {
     s_thresh = thresh; s_radius = radius; s_strength = strength;
@@ -88,11 +91,23 @@ void fx_bloom(uint32_t *rgba, int w, int h) {
     box_pass(s_a, s_b, w, h, s_radius, 0);
     // Composite: add the blurred light back, clamped. Additive is what light does — two glows
     // that overlap are brighter, and a bright source blows its own halo toward white.
+    // 🔴 HOW the overflow is clamped is a LOOK decision, not an implementation detail, and it took a
+    // real complaint to see it. Clamping each channel on its own (the default, and what everybody does)
+    // means the channels reach the ceiling at different times, so the composite DRIFTS IN HUE as it
+    // brightens — toward white. That drift is the whole charm of a warm light: an overexposed core in a
+    // coloured glow. But a cool source whose blue is already pinned at 255 has nowhere to drift TO: the
+    // core goes flat white in one step while the halo around it, which never clipped, keeps every bit of
+    // its colour — and the eye reads the boundary between them as a hard coloured ring, not as light.
+    // s_huelock scales all three together instead, so brightness climbs and hue never moves. See fx.h.
     for (int i = 0; i < px; i++) {
         uint32_t o = rgba[i], glow = s_a[i];
         int r = (int)((o >> 16) & 255) + (int)((((glow >> 16) & 255) * s_strength) >> 8);
         int g = (int)((o >>  8) & 255) + (int)((((glow >>  8) & 255) * s_strength) >> 8);
         int b = (int)( o        & 255) + (int)((( glow        & 255) * s_strength) >> 8);
+        if (s_huelock) {
+            int m = r > g ? (r > b ? r : b) : (g > b ? g : b);
+            if (m > 255) { r = r * 255 / m; g = g * 255 / m; b = b * 255 / m; }
+        }
         if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
         rgba[i] = (o & 0xFF000000u) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
     }
