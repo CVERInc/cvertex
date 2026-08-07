@@ -302,8 +302,16 @@ const Mesh g_cube = { cube_v, 8, cube_t, 12 };
 
 // ---- scenes -----------------------------------------------------------------
 
-#define MAXSV 8192
-#define MAXST 16384
+/* 🔴 8,192 -> 12,288 ON 2026-08-07, AND THE NUMBER CAME FROM A MEASUREMENT. A cartridge whose trees
+   were finally sized like trees (crown radius 3-5 m instead of 1-2, which is what a broadleaf is)
+   asked for 8,624 vertices where the ceiling was 8,192 — over by five percent, not by a factor.
+   Triangles already fitted (15,016 against 16,384). So the world was losing geometry to a cap it
+   only just exceeded, and the visible symptom was a red FACE CAP label and holes.
+   The cost is 16 bytes of scratch per vertex here (three int32 and two int16), so this is 64 KB of
+   BSS and nothing at all on disk. Raised with headroom rather than to exactly 8,624, because a cap
+   set to the first measurement that needed it is a cap that trips again on the next tree. */
+#define MAXSV 12288
+#define MAXST 24576        /* the same 2:1 the previous pair had; measured demand 15,016 */
 
 static int32_t sv_x[MAXSV], sv_y[MAXSV], sv_z[MAXSV];
 static int16_t sv_sx[MAXSV], sv_sy[MAXSV];
