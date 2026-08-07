@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include "version.h"   // cvertex_title() — the cartridge name plus the build stamp
 #include "core.h"
 #include "synth.h"
 #include "game.h"
@@ -329,7 +330,7 @@ int main(int argc, char **argv) {
     g_win_w = g_fbw * 2; g_win_h = g_fbh * 2;   // 2x, same "chunky pixel" default the twins use
     g_win = XCreateSimpleWindow(g_dpy, RootWindow(g_dpy, screen), 0, 0, g_win_w, g_win_h, 0,
                                 BlackPixel(g_dpy, screen), BlackPixel(g_dpy, screen));
-    XStoreName(g_dpy, g_win, g->name);
+    XStoreName(g_dpy, g_win, cvertex_title(g->name));
     XSelectInput(g_dpy, g_win, KeyPressMask | KeyReleaseMask | StructureNotifyMask);
     g_wmdelete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
     XSetWMProtocols(g_dpy, g_win, &g_wmdelete, 1);   // route the close box to us as a ClientMessage
@@ -396,7 +397,7 @@ int main(int argc, char **argv) {
             }
             g->init();
             memset(g_keys, 0, sizeof g_keys);
-            XStoreName(g_dpy, g_win, g->name);
+            XStoreName(g_dpy, g_win, cvertex_title(g->name));
             if (net_active()) { mysum = g->checksum(); net_frame = was_active ? net_frame + 1 : 0; }
             continue;
         }

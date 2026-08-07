@@ -533,7 +533,7 @@ int main(int argc, char **argv) {
     id win = MSG(id)(CLS_("NSWindow"), SEL_("alloc"));
     win = MSG(id, CGRect, unsigned long, unsigned long, BOOL)(win,
         SEL_("initWithContentRect:styleMask:backing:defer:"), r, 1 | 2 | 4, 2, NO);
-    id title = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), g->name);
+    id title = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"), cvertex_title(g->name));
     MSG(void, id)(win, SEL_("setTitle:"), title);
 
     id view = MSG(id)((id)vc, SEL_("alloc"));
@@ -615,6 +615,13 @@ int main(int argc, char **argv) {
             // menu, so both pick the same cartridge and re-init identically. Just re-baseline
             // the checksum to the fresh state.
             g = g_switch_to; g_switch_to = 0;
+            // 🔴 AND THE TITLE FOLLOWS THE CARTRIDGE. lnx.c and win.c have always re-set it on a
+            // switch; mac.c set it once at window creation and never again, so the bar said "menu"
+            // for the whole session whatever you were playing — and on 2026-08-07 that was the
+            // first thing the maintainer used to ask whether he had opened the wrong thing.
+            { id t = MSG(id, const char *)(CLS_("NSString"), SEL_("stringWithUTF8String:"),
+                                           cvertex_title(g->name));
+              MSG(void, id)(win, SEL_("setTitle:"), t); }
             music_play(0, 0, 0, 0);
             g3d_light(0, 0, 0);   // and back to the headlamp — a cartridge's light is content, like its song
             g_present_fx = 0;     // and eject the light chip — post-processing is content too, must not follow out

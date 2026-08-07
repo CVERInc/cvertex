@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "version.h"   // cvertex_title() — the cartridge name plus the build stamp
 #include "core.h"
 #include "synth.h"
 #include "game.h"
@@ -268,7 +269,7 @@ int main(int argc, char **argv) {
             }
             g->init();
             memset(g_keys, 0, sizeof g_keys);
-            SetWindowText(g_hwnd, g->name);
+            SetWindowText(g_hwnd, cvertex_title(g->name));
             if (net_active()) { mysum = g->checksum(); net_frame = was_active ? net_frame + 1 : 0; }
             continue;
         }
