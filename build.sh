@@ -16,6 +16,9 @@ strip -x "$OUT"
 
 # Size is a first-class result, so every build reports it. Machine code is the honest
 # number — the rest of the binary is container overhead and baked artwork.
-BYTES=$(stat -f%z "$OUT")
+# 🔴 ABSOLUTE PATH: `stat -f%z` is BSD syntax, and a Mac with homebrew coreutils on PATH
+# answers with GNU stat, which rejects it — so the build "fails" on the size report while the
+# binary it just produced sits there working. The compile is not what broke; the tally is.
+BYTES=$(/usr/bin/stat -f%z "$OUT")
 TEXT=$(size -m "$OUT" 2>/dev/null | awk '/Section __text/{print $3}')
 printf '%s: %s bytes  (%s of it machine code)\n' "$OUT" "$BYTES" "${TEXT:-?}"
