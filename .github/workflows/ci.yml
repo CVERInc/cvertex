@@ -1,0 +1,72 @@
+# 🔴 為什麼這個檔案存在。
+#
+# 這個 repo 有 55 項綠色的檢查(test.sh:每一張卡匣都要 build、跑得動、而且決定性),
+# 而在 2026-08-27 之前**沒有任何東西在守它們** —— 綠不綠取決於有沒有人記得在自己的機器上跑。
+# 那一天發生了兩件事,兩件都是這個檔案本來會擋下的:
+#
+#   1. `build.sh` 用 BSD 的 `stat -f%z`,而一台裝了 homebrew coreutils 的 Mac 上
+#      `stat` 是 GNU 的、會拒絕它 —— **編譯成功、binary 好好地躺在那裡,腳本掛在最後那行
+#      「報大小」**,於是 test.sh 讀那個退出碼、報成「FAIL builds」。一句對腳本為真、
+#      對這個 build 為假的話。它在 repo 裡活了很久,因為沒有人在乾淨的機器上跑過。
+#
+#   2. 一個改動同時碰了 `mac.c`、`lnx.c` 和 `win.c`,而 `build.sh` **只編 mac.c**。
+#      另外兩個平台的那幾行是被寫下、被 commit、被推出去,而**從來沒有被編譯器看過**。
+#
+# ⇒ 兩個 job,而它們的分工正是上面那兩件事:
+#     macOS 跑完整的 test.sh(建置 + 每張卡匣的決定性)
+#     Linux 只求編得起來 —— 它存在的唯一理由是**讓 lnx.c 被編譯器看到**
+#
+# Windows(win.c)同樣只求編得起來。跨編用 zig,而 zig 從 pip 裝 —— 不用第三方 action,
+# 版本由 pip 釘住。⚠️ 它不跑:那是一個 .exe,而這裡沒有 Windows 可以跑它。
+# 「編得起來」對這一格是誠實的下限,不是假裝的完整。
+
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS — build + 55 checks
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 🔴 test.sh 自己會先 build,所以這裡不重複 build —— 重複的那一次會讓
+      # 「哪一步紅的」變得不明確,而這支腳本的第一項檢查就叫 "builds"。
+      - name: sh test.sh
+        run: sh test.sh
+
+  linux:
+    name: Linux — 只確認 lnx.c 編得起來
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # X11 與 ALSA 之於 Linux,等同 Cocoa 之於 macOS:系統程式庫,不是第三方相依。
+      - name: apt
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libx11-dev libasound2-dev
+      - name: sh build-linux.sh
+        run: sh build-linux.sh
+      # 建得起來還不夠 —— 一個連 menu 都跑不動的 binary 是編譯過的垃圾。
+      # 跑一張卡匣 300 幀,證明這個平台層真的活著。
+      - name: 跑一張卡匣證明它活著
+        run: ./cvertex --game waxwing --headless 300 | grep -q 'sim_checksum='
+
+  windows-cross:
+    name: Windows — 只確認 win.c 編得起來
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # build-win.sh 叫的是 `zig`,所以給它一個 zig。pip 的 ziglang 是官方發布的同一份工具鏈,
+      # 版本釘在這裡,而不是交給一個會自己更新的第三方 action。
+      - name: zig
+        run: |
+          python3 -m pip install --quiet ziglang==0.16.0
+          printf '#!/bin/sh\nexec python3 -m ziglang "$@"\n' | sudo tee /usr/local/bin/zig >/dev/null
+          sudo chmod +x /usr/local/bin/zig
+          zig version
+      - name: sh build-win.sh
+        run: sh build-win.sh
+      - name: 產物必須真的存在
+        run: test -s cvertex.exe && ls -l cvertex.exe
