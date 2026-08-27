@@ -30,6 +30,29 @@ void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz);
 // never feeds the sim, so this cannot touch determinism.
 void g3d_light(int32_t lx, int32_t ly, int32_t lz);
 
+// The same light, but written in WORLD space — for a sun, which is a direction the world
+// holds still while the player turns. g3d_light's slot is view space; put a world vector
+// in it and the sun quietly follows the lens, and nothing in the type system can see it,
+// because both are three int32. Say which space you mean and the engine does the change of
+// basis with the camera the scene is actually drawn through. Reset by g3d_light().
+void g3d_light_world(int32_t lx, int32_t ly, int32_t lz);
+
+// How far the shading wraps past the terminator, 0..255. 0 (the default) is the bare
+// cosine, where every face turned away from the light lands on the SAME darkest step —
+// so a box in shadow shows three faces of one flat colour and stops reading as a box.
+// A shadow isn't unlit, it's sky-lit, and the sky is a hemisphere: fill is how much of it
+// reaches round the back. The platform resets this on every game switch, like the light
+// itself and like the palette — it is taste, and taste is content.
+void g3d_light_fill(int fill);
+
+// The same cosine-to-eight-steps the meshes are shaded by, for a caller that shades its own
+// pixels — a ray-marched backdrop, an impostor, a billboard. Geometry has to stop somewhere,
+// and where it stops the two renderers meet; if they answer "how does this face catch the sun"
+// with two different rules, the seam is a line you can see, and it moves as the light does.
+// Takes a WORLD normal (~unit Q15) and returns 0..7 to add to a palette base, exactly as
+// g3d_scene does. Reads the world light set by g3d_light_world.
+int g3d_shade_world(int32_t nx, int32_t ny, int32_t nz);
+
 // One mesh, placed. Several of these make a scene.
 typedef struct {
     const Mesh *m;

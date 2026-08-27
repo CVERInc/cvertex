@@ -214,18 +214,96 @@ void g3d_unview(int32_t *px, int32_t *py, int32_t *pz, int ax, int ay, int az) {
 // nz * -32768 * 8 >> 30 == -nz * 8 >> 15 exactly, power-of-two shifts all the way down.
 // Every game that never asks for a light renders the same pixels it always did.
 static int32_t g_lx, g_ly, g_lz;
-void g3d_light(int32_t lx, int32_t ly, int32_t lz) { g_lx = lx; g_ly = ly; g_lz = lz; }
-static int light_shade(int32_t nx, int32_t ny, int32_t nz) {
-    int64_t d = (g_lx | g_ly | g_lz)
-              ? (int64_t)nx * g_lx + (int64_t)ny * g_ly + (int64_t)nz * g_lz
-              : (int64_t)nz * -32768;
-    int shade = (int)(d * 8 >> 30);
+static int     g_lworld;                     // is the vector above written in WORLD space?
+static int32_t g_vlx, g_vly, g_vlz;          // ...and the same light resolved into VIEW space
+static int32_t g_lk, g_lrecip;               // the fill, precomputed (see g3d_light_fill)
+
+void g3d_light(int32_t lx, int32_t ly, int32_t lz) { g_lx = lx; g_ly = ly; g_lz = lz; g_lworld = 0; }
+
+// 🔴 A SUN IS NOT A HEADLAMP, AND THE DIFFERENCE IS A COORDINATE SYSTEM.
+// g3d_light's vector lives in VIEW space, which is exactly right for the thing it was
+// built for: a headlamp is fixed to the lens and has no opinion about the world. Point
+// that same slot at a sun — a direction the WORLD holds still — and the sun silently
+// becomes glued to the player's face: stand still, turn on the spot, and the lit side of
+// every wall turns with you. Measured in a cartridge that did this: one wall, camera yaw
+// only, nothing else moved, its shade climbed 0 -> 1 -> 2. Nothing in the API could catch
+// it, because a world direction and a view direction are the same three int32.
+// So the space is now part of the call. A world light is resolved with the camera the
+// scene is drawn through, riding the same g3d_view its normals ride, which makes "the
+// light and the normals are in one space" true by construction instead of by remembering.
+// Only g3d_view, NOT the scene turn rx/ry/rz: spinning the scene has to change how its
+// faces catch the sun, or it isn't a sun — it's a lamp bolted to the turntable.
+void g3d_light_world(int32_t lx, int32_t ly, int32_t lz) { g_lx = lx; g_ly = ly; g_lz = lz; g_lworld = 1; }
+
+// 🔴 HOW FAR THE LIGHT REACHES PAST THE TERMINATOR — the fix for a cube that stops being
+// a cube. 0 (the default) is the bare cosine: every face pointing away from the light
+// dots negative, clamps, and lands on the SAME darkest step. A box has six normals and a
+// directional light puts three of them there, so a box in shadow is three faces of one
+// flat colour and the shape is gone. That is not a stylisation, it is the clamp showing
+// through — and it is worst on the largest, nearest surfaces, the ones a player reads
+// the ground from.
+// A shadow is not unlit; it is lit by the sky, and the sky is a hemisphere, so the face
+// pointing up out of a shadow catches more of it than the face pointing down. fill says
+// how much of that there is, in 1/255ths, by spreading the eight steps over cos in
+// [-fill/255, 1] instead of [0, 1]. The silhouette keeps its shape, the light keeps its
+// direction, and the darkest step stops being the place information goes to die.
+// fill = 0 takes the old expression verbatim rather than an arithmetic re-derivation of
+// it, so a game that never calls this is bit-identical by construction: there is no
+// rounding to argue about, because that path never runs.
+void g3d_light_fill(int fill) {
+    fill = fill < 0 ? 0 : fill > 255 ? 255 : fill;
+    if (!fill) { g_lk = g_lrecip = 0; return; }
+    g_lk = fill * 32768 / 255;                          // the wrap, in the same Q15 as cos
+    g_lrecip = (int32_t)(((int64_t)8 << 30) / (32768 + g_lk));   // 8 steps / the widened range
+}
+
+// The light, moved into the space the normals are about to be in. Once per draw pass,
+// before a single normal is shaded — a per-triangle g3d_view would be the same answer
+// computed thousands of times.
+static void light_resolve(const Cam *cam) {
+    int32_t x = g_lx, y = g_ly, z = g_lz;
+    if (g_lworld && cam) g3d_view(&x, &y, &z, cam->ax, cam->ay, cam->az);
+    g_vlx = x; g_vly = y; g_vlz = z;
+}
+
+// cos (Q30) -> one of eight steps. The one place that decision is made, so a caller that
+// shades its own pixels cannot drift from the meshes drawn beside it.
+static int shade_from(int64_t d) {
+    int shade;
+    if (g_lrecip) {
+        // cos back down to Q15, shifted into [0, range], then scaled to eight steps by a
+        // multiply — the divide was paid once in g3d_light_fill, and this runs per triangle.
+        shade = (int)((((int64_t)(int32_t)(d >> 15) + g_lk) * g_lrecip) >> 30);
+    } else {
+        shade = (int)(d * 8 >> 30);
+    }
     return shade < 0 ? 0 : shade > 7 ? 7 : shade;
+}
+
+static int light_shade(int32_t nx, int32_t ny, int32_t nz) {
+    return shade_from((g_vlx | g_vly | g_vlz)
+                      ? (int64_t)nx * g_vlx + (int64_t)ny * g_vly + (int64_t)nz * g_vlz
+                      : (int64_t)nz * -32768);
+}
+
+// 🔴 THE SAME EIGHT STEPS, FOR A CALLER THAT SHADES ITS OWN PIXELS — a ray-marched backdrop,
+// an impostor, a billboard. Those exist because geometry has to stop somewhere, and where it
+// stops the two renderers meet: if they answer "how does this face catch the sun" with two
+// different rules, the seam is a line you can see, and it moves as the light does. So this is
+// not a convenience wrapper. It is the same function, and the point is that there is only one.
+// It reads the WORLD light, because a caller like this has world normals in hand and no camera
+// transform of its own; under a view-space light (the headlamp) it answers about the lens,
+// which is the correct reading of that light for a caller that has no camera.
+int g3d_shade_world(int32_t nx, int32_t ny, int32_t nz) {
+    return shade_from((g_lx | g_ly | g_lz)
+                      ? (int64_t)nx * g_lx + (int64_t)ny * g_ly + (int64_t)nz * g_lz
+                      : (int64_t)nz * -32768);
 }
 
 void g3d_draw(const Mesh *m, int ax, int ay, int az, int32_t tz) {
     int32_t vx[MAXV], vy[MAXV], vz[MAXV];
     int16_t sx[MAXV], sy[MAXV];
+    light_resolve(0);        // no camera here: this pass never turns the world, so world IS view
 
     // ---- vertices: rotate → translate → project
     for (int i = 0; i < m->nv && i < MAXV; i++) {
@@ -319,6 +397,7 @@ static struct { uint16_t a, b, c; uint8_t ci; } st[MAXST];
 
 void g3d_scene(const Inst *inst, int ninst, const Cam *cam, int rx, int ry, int rz) {
     int nv = 0, nt = 0;
+    light_resolve(cam);      // a world light becomes a view light HERE, with this frame's camera
 
     for (int i = 0; i < ninst; i++) {
         const Inst *in = &inst[i];

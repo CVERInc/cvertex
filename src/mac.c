@@ -624,6 +624,7 @@ int main(int argc, char **argv) {
               MSG(void, id)(win, SEL_("setTitle:"), t); }
             music_play(0, 0, 0, 0);
             g3d_light(0, 0, 0);   // and back to the headlamp — a cartridge's light is content, like its song
+            g3d_light_fill(0);    // ...and the same for how far it wraps: taste is content too
             g_present_fx = 0;     // and eject the light chip — post-processing is content too, must not follow out
             // CO-OP chosen in the OPTIONS panel (g_coop: 1 HOST / 2 JOIN): stand up the lockstep net
             // now, as the cart plugs in — the menu-driven equivalent of the --host/--join flags, so a
