@@ -50,8 +50,16 @@ jobs:
         run: sh build-linux.sh
       # 建得起來還不夠 —— 一個連 menu 都跑不動的 binary 是編譯過的垃圾。
       # 跑一張卡匣 300 幀,證明這個平台層真的活著。
+      # 🩸 第一版把卡匣的名字寫死成 `waxwing` —— 而 waxwing 是**卡匣實驗室**那個 repo 的東西,
+      #    這裡沒有。CI 第一次跑就紅在這一行,訊息是 "no game called 'waxwing'"。
+      #    ⇒ 名字改成跟 test.sh 同一種取法:問這個 binary 自己有哪些卡匣,拿第一張。
+      #    寫死的名冊項目,會在別人改名冊那天安靜過期。
       - name: 跑一張卡匣證明它活著
-        run: ./cvertex --game waxwing --headless 300 | grep -q 'sim_checksum='
+        run: |
+          G=$(./cvertex --help 2>/dev/null | sed -n 's/.*available: //p' | awk '{print $1}')
+          test -n "$G" || { echo "這個 binary 一張卡匣都報不出來"; exit 1; }
+          echo "跑 $G"
+          ./cvertex --game "$G" --headless 300 | grep -q 'sim_checksum='
 
   windows-cross:
     name: Windows — 只確認 win.c 編得起來
