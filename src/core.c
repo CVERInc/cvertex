@@ -122,7 +122,7 @@ int      g_quit;          // menu -> platform: the CRT power-off finished, stop 
 // __bss, nothing on disk) AND "untouched == today's behaviour" is true by construction. The
 // menu raises g_crt_off to 1 at init() (the collapse plays by default); mac.c sets g_fullscreen
 // from the --fullscreen flag. Both are runtime assignments, never data-segment initializers.
-int      g_gentle, g_coop, g_fullscreen, g_crt_off, g_cam_chase;
+int      g_gentle, g_coop, g_fullscreen, g_crt_off, g_cam_chase, g_headless;
 
 void fb_resize(int w, int h) {
     if (w > MAXFBW) w = MAXFBW;

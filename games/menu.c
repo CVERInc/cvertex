@@ -4,6 +4,7 @@
 // picker — it sets g_switch_to — wearing a machine.
 //
 // The wobble, the sheen ramp and the eases come out of cubeconjure.
+#include <stdio.h>    // fopen/fgets/fprintf, for the shelf's one-line memory (menu.sav)
 #include <stdlib.h>   // getenv, for the turntable dev instrument
 #include <string.h>   // memcpy, for the CRT power-off tube collapse
 #include "core.h"
@@ -29,7 +30,22 @@ static int g_flip, g_fliptarget, g_prev_up;   // flip the selected cart over (Up
 static int g_spin_x, g_spin_y, g_prev_insp;   // (retired) INSPECT free-spin state; kept so the idle-decay math below no-ops harmlessly
 static int g_prev_jump;                  // Space rising-edge latch: open OPTIONS from the shelf / back out of it
 // OPTIONS panel: the rows, the cursor, and the Left/Right + Up/Down edge latches.
-enum { OPT_GENTLE, OPT_COOP, OPT_FULLSCREEN, OPT_CAMERA, OPT_CRT, OPT_BACK, OPT_N };
+// 🔴 CO-OP IS BUILD-GATED (-DCVX_NET), and it is off by default because the row FREEZES the console.
+// Choosing HOST and launching lands in net_host(), whose accept() is a blocking call with no timeout
+// and no cancel: the window stops answering, Esc does nothing, and the only way out is Force Quit —
+// on the OPTIONS screen of a console whose whole promise is that you can always get back to the
+// shelf. An option that can strand a player is not a half-finished feature, it is a trap, and a
+// shipped build must not show it. The transport underneath is real and works (--host / --join still
+// reach it from the command line, where a terminal-shaped wait is an ordinary thing and Ctrl-C
+// exists); what is missing is a non-blocking accept with an Esc-cancel, and until that exists the
+// row stays out of the panel. The row disappears from the enum, not just from the drawing, so
+// OPT_N shrinks and nothing — cursor wrap, hit-testing, the label table — can drift out of step
+// with what is on screen.
+enum { OPT_GENTLE,
+#ifdef CVX_NET
+       OPT_COOP,
+#endif
+       OPT_FULLSCREEN, OPT_CAMERA, OPT_CRT, OPT_BACK, OPT_N };
 static int g_opt_sel, g_opt_prev_x, g_opt_prev_y;
 static int32_t g_scroll;                 // smoothed shelf index (16.16), chasing g_sel
 static uint32_t g_frame;
@@ -41,11 +57,54 @@ static uint32_t g_frame;
 
 static const Game *const *g_list;
 static int g_n;
+// The shelf's OWN order, copied out of the roster the platform hands us. It has to be a copy: the
+// roster is `const Game *const *` generated at build time and is not ours to permute, and the shelf
+// wants a different order from it — most recently played first, the way a console you actually use
+// puts the last cart back on top of the pile instead of filing it alphabetically.
+static const Game *g_order[MAXCART];
+#define MENU_SAV "menu.sav"          // one line: the name of the last cartridge launched
+
 // Clamp the shelf to what the static cart-mesh arrays can hold. Nav wraps on g_n and the render caps
 // at MAXCART; if they disagree (roster > MAXCART) the extra carts are selectable but never drawn — an
 // invisible-but-enterable "ghost" cart at the end. Clamping HERE keeps nav and render on the same count,
 // so a ghost can't exist; MAXCART itself has headroom so nothing is dropped in practice.
-void menu_populate(const Game *const *list, int n) { g_list = list; g_n = n < MAXCART ? n : MAXCART; }
+void menu_populate(const Game *const *list, int n) {
+    g_n = n < MAXCART ? n : MAXCART;
+    for (int i = 0; i < g_n; i++) g_order[i] = list[i];
+    // Read-only, and read-only on purpose: cvx_data_path(...,0) creates nothing, so populating the
+    // shelf never leaves a directory behind on a headless run. A missing file, an unreadable one, or
+    // a name that matches nothing in today's roster all land in the same place — roster order — which
+    // is why there is no error path here. A shelf order is a convenience, never a correctness claim.
+    char last[64];
+    if (g_headless) { g_list = g_order; return; }   // a stale file next to the binary must never change a headless result
+    FILE *f = fopen(cvx_data_path(MENU_SAV, 0), "rb");
+    if (!f) { g_list = g_order; return; }
+    if (!fgets(last, sizeof last, f)) last[0] = 0;
+    fclose(f);
+    for (int i = 0; last[i]; i++) if (last[i] == '\n' || last[i] == '\r') { last[i] = 0; break; }
+    // STABLE pull-to-front: the remembered cart moves to slot 0 and everything it passed shuffles
+    // down one, keeping its relative order. A swap would be one line shorter and would scramble the
+    // roster a little more every time you played — the shelf would stop being recognisable.
+    if (last[0]) for (int i = 1; i < g_n; i++) if (!strcmp(g_order[i]->name, last)) {
+        const Game *want = g_order[i];
+        for (int j = i; j > 0; j--) g_order[j] = g_order[j - 1];
+        g_order[0] = want;
+        break;
+    }
+    g_list = g_order;
+}
+
+// Written as a cart plugs in — see game.h for why the platform must not call this on a headless run.
+// Failure is silent by design: a read-only install still plays every game, it just always opens on
+// the roster's first cart, and a console that refused to launch anything because it could not write
+// a convenience file would be a worse console than one that forgets.
+void menu_note_launch(const char *name) {
+    if (!name || !name[0]) return;
+    FILE *f = fopen(cvx_data_path(MENU_SAV, 1), "wb");
+    if (!f) return;
+    fprintf(f, "%s\n", name);
+    fclose(f);
+}
 
 #define INS_LEN 140          // total P_INSERT frames: a long, admirable dive + a seated HOLD beat
 #define SEAT    44           // frames the seated HOLD lasts — also = frames before the end the cart hits home,
@@ -578,9 +637,14 @@ static void build_dev(const char *author) {
     tb_begin(&txt_m, txt_v, txt_t, TMAXV, TMAXT);
     int32_t availw = g_lw * 2 * 92 / 100;
     int32_t cyc    = (g_lt + g_lb) / 2;
+    // An unsigned cartridge gets a BLANK back, not a byline reading "BY ANONYMOUS". game.h says a
+    // NULL author "reads as anonymous", and the shelf took that literally — so every cart nobody had
+    // signed yet wore a credit line naming a person who does not exist, which looks like a shipped
+    // placeholder rather than an absence. Nothing to say, so say nothing.
+    if (!author || !author[0]) return;
     static char dev[40];
     int j = 0; dev[j++] = 'B'; dev[j++] = 'Y'; dev[j++] = ' ';
-    const char *a = (author && author[0]) ? author : "ANONYMOUS";
+    const char *a = author;
     for (int i = 0; a[i] && j < 38; i++) dev[j++] = a[i];
     dev[j] = 0;
     emit_text(dev, (g_ld + U * 7 / 100), 32767, 1, 144, availw, cyc);      // BACK: BY <author>, light ink, mirrored
@@ -621,7 +685,9 @@ static void beep(int wave, int midi, int vel) { synth_note(NCHAN - 1, wave, midi
 static void options_change(int dir) {
     switch (g_opt_sel) {
         case OPT_GENTLE:     g_gentle = !g_gentle; break;                 // a survival cartridge's taming dial, at runtime
+#ifdef CVX_NET
         case OPT_COOP:       g_coop = (g_coop + dir + 3) % 3; break;      // 0 SOLO / 1 HOST / 2 JOIN — platform stands up net at launch
+#endif
         case OPT_FULLSCREEN: g_fullscreen = !g_fullscreen; break;        // platform toggles the live window to match
         case OPT_CAMERA:     g_cam_chase = !g_cam_chase; break;          // a 3D game's default view
         case OPT_CRT:        g_crt_off = !g_crt_off; break;              // whether Esc-quit plays the tube collapse
@@ -705,7 +771,13 @@ static void tick(const Input in[2]) {
         g_boot++;
         for (int i = 0; i < NLET; i++)                        // a rising chime as each letter seats
             if (g_boot == i * STAG + FLY) beep(4, 55 + i * 3, 110);   // instr 4: FM ping, sustain 0
-        int mv = in[0].x + in[1].x + in[0].y + in[1].y;       // any nudge skips the intro
+        // "PRESS ANY KEY" has to mean any key. This was a SUM of the four axes, which missed both
+        // buttons entirely — the two keys a person actually presses when a screen says press any
+        // key — and cancelled itself out whenever two axes disagreed (left on one pad, up on the
+        // other, sum zero, intro plays on). An OR of everything the platform can report says what
+        // the screen says.
+        int mv = in[0].x || in[1].x || in[0].y || in[1].y ||
+                 in[0].jump || in[1].jump || in[0].act || in[1].act;
         if (mv || g_boot >= BOOT_LEN) { g_phase = P_SHELF; g_cool = 6; }
         return;
     }
@@ -1016,12 +1088,25 @@ static void draw_shelf(void) {
     // The controls hint, two centred rows. As one line (~69 chars) it was 826px wide on a 640px
     // framebuffer — both ends ran off-screen (BROWSE clipped left, ESC POWER clipped right). Split so
     // each row fits with margin at any sane resolution, and drawn in the readable secondary grey.
-    static const char *hintA = "ARROWS BROWSE    UP FLIP    DOWN INSERT";
-    static const char *hintB = "SPACE OPTIONS    ESC POWER OFF";
+    // 🔴 IT NOW SAYS WHAT THE KEYS DO. "ARROWS BROWSE" was wrong in a way that costs a first-time
+    // player the whole shelf: Up and Down are not browse, they are flip and insert, so anyone who
+    // read the hint and pressed Up to "scroll" turned a cart over, and anyone who pressed Down
+    // launched a game they had not chosen. Only Left and Right browse, so the hint says so.
+    // The third row is the one thing the shelf never told anyone: how to get BACK here from inside
+    // a game. Esc has done it since the two-stage Esc landed, and nothing on screen said so — the
+    // player's only known exit was the one that quits the program.
+    // Word arrows, not glyph arrows: text.c's 5x7 font has A-Z, 0-9 and - . : / ? and no arrowheads
+    // (checked, not assumed), and a hint that renders as blank cells is worse than a longer one.
+    static const char *hintA = "LEFT RIGHT BROWSE    UP FLIP";
+    static const char *hintB = "DOWN INSERT    SPACE OPTIONS";
+    static const char *hintC = "ESC POWER OFF    IN GAME ESC BACK HERE";
     // Lifted clear of the bottom edge: the console's deck now breaks into frame down there, and grey
     // hint text laid over grey moulding is the one place this screen stops being instantly readable.
-    text_draw(cx - text_width(hintA, s) / 2, g_fbh - 37 * s, s, hintA, 1);
-    text_draw(cx - text_width(hintB, s) / 2, g_fbh - 25 * s, s, hintB, 1);   // ~9% off the bottom, matching the title's top margin
+    // Three rows now, so the stack starts one 12*s step higher; no row is wider than the 38 characters
+    // the old first row already was, so nothing newly reaches for the edges.
+    text_draw(cx - text_width(hintA, s) / 2, g_fbh - 49 * s, s, hintA, 1);
+    text_draw(cx - text_width(hintB, s) / 2, g_fbh - 37 * s, s, hintB, 1);
+    text_draw(cx - text_width(hintC, s) / 2, g_fbh - 25 * s, s, hintC, 1);   // ~9% off the bottom, matching the title's top margin
 }
 
 // The OPTIONS panel: a raised plate in the console's palette, a vertical list of settings with the
@@ -1030,7 +1115,9 @@ static void draw_shelf(void) {
 static const char *opt_value(int row) {
     switch (row) {
         case OPT_GENTLE:     return g_gentle ? "ON" : "OFF";
+#ifdef CVX_NET
         case OPT_COOP:       return g_coop == 1 ? "HOST" : g_coop == 2 ? "JOIN" : "SOLO";
+#endif
         case OPT_FULLSCREEN: return g_fullscreen ? "ON" : "OFF";
         case OPT_CAMERA:     return g_cam_chase ? "CHASE" : "FIRST-PERSON";
         case OPT_CRT:        return g_crt_off ? "ON" : "OFF";
@@ -1038,7 +1125,11 @@ static const char *opt_value(int row) {
     }
 }
 static void draw_options(void) {
-    static const char *label[OPT_N] = { "GENTLE MODE", "CO-OP", "FULLSCREEN", "CAMERA", "CRT POWER-OFF", "BACK" };
+    static const char *label[OPT_N] = { "GENTLE MODE",
+#ifdef CVX_NET
+                                        "CO-OP",
+#endif
+                                        "FULLSCREEN", "CAMERA", "CRT POWER-OFF", "BACK" };
     fb_clear(0);
     int s = g_fbh / 180; if (s < 1) s = 1;
     int cx = g_fbw / 2;

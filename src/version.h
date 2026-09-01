@@ -6,6 +6,13 @@
 // release is a one-line change and the two can never disagree.
 #define CVERTEX_VERSION "0.1.0"
 
+// The product's own name, for the places that are not a window title: the per-user directory the
+// console falls back to when it cannot write next to itself (src/data.c). It lives HERE, beside the
+// version, because a name typed a second time in a second file is a name that will eventually
+// disagree with itself — and a data directory that changes spelling loses the player's saves
+// without ever failing.
+#define CVERTEX_NAME "cvertex"
+
 // 🔴 AND A SECOND, DIFFERENT QUESTION: not "which release is this" but "which BUILD am I looking
 // at". They are not the same thing and conflating them helps nobody — a release number is bumped
 // deliberately and rarely, while the question a screenshot raises is "is this the build you

@@ -145,6 +145,28 @@ extern int g_coop;        // CO-OP at launch: 0 SOLO, 1 HOST, 2 JOIN — the pla
 extern int g_fullscreen;  // FULLSCREEN want: the platform toggles the live window to match when it changes (0 = windowed)
 extern int g_crt_off;     // CRT POWER-OFF flourish on Esc-quit: 1 = the tube collapse plays, 0 = quit straight to black
 extern int g_cam_chase;   // camera default a 3D game may read: 0 = first-person (today), 1 = chase
+extern int g_headless;    // 1 under --headless / --ppm / --dump: observe, never persist
+
+// ---- where the console keeps its files --------------------------------------
+// One question, answered once, for anything that wants to persist: WHERE. The primary is the
+// directory the executable sits in — a portable install stays portable, copy the folder and your
+// files come along — and on macOS a bundled build means the folder CONTAINING X.app, never
+// Contents/MacOS inside it. If that directory is not writable (App Translocation's read-only
+// shadow mount, /Applications under a non-admin account, read-only media) the answer falls back to
+// the platform's per-user data directory: ~/Library/Application Support/<product>,
+// $XDG_DATA_HOME/<product> (else ~/.local/share/<product>), %APPDATA%\<product>.
+//
+// 🔴 THE CONTRACT: asking where costs nothing; saying you will write is what makes a directory.
+// Resolution is access()/readlink only — no probe file, no mkdir — so --headless / --ppm / --dump
+// leave the filesystem exactly as they found it. Pass for_write = 1 and the directory is created
+// if it does not exist; pass 0 to read (a path to a file that is not there is a normal answer, and
+// the caller's job is to cope, not to create). The returned pointer is a STATIC buffer, valid until
+// the next call — copy it if you need to keep it. Resolution happens once and is then cached.
+const char *cvx_data_path(const char *file, int for_write);
+
+// The resolved directory itself, for a debug overlay: "it isn't saving" is a question nobody can
+// answer without knowing where it tried. Never creates anything.
+const char *cvx_data_dir(void);
 
 // ---- depth ------------------------------------------------------------------
 // 🔴 A painter's algorithm sorted per triangle is not a depth test, it's a guess that

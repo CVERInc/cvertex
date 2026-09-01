@@ -245,6 +245,7 @@ int main(int argc, char **argv) {
         }
         else if (argv[a][0] == '-' && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
+    g_headless = (runmode != 0);
     // One char of the script -> one frame of input.
     #define SCRIPT(f) do { \
         in[0] = (Input){ 0, 0, 0, 0 }; in[1] = (Input){ 0, 0, 0, 0 }; \
@@ -381,6 +382,12 @@ int main(int argc, char **argv) {
         }
         if (g_quit) break;
         if (g_switch_to) {
+            // Remember what is being plugged in, so the shelf opens on it next time. 🔴 Guarded by
+            // runmode: --headless / --ppm / --dump must observe the console without changing it, and
+            // a launch note written during a determinism check would seed the NEXT check with a
+            // different shelf order — a test that quietly stops measuring what it measured before.
+            // The menu itself is not a cartridge, so returning to the shelf does not overwrite the note.
+            if (!runmode && g_switch_to != &game_menu) menu_note_launch(g_switch_to->name);
             g = g_switch_to; g_switch_to = 0;
             music_play(0, 0, 0, 0);   // silence the old game before the new one speaks; the platform's job
             g3d_light(0, 0, 0);       // and back to the headlamp — a cartridge's light is content, like its song

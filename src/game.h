@@ -61,6 +61,15 @@ extern int g_quit;          // menu -> platform: the CRT power-off finished; sto
 extern const Game game_menu;
 void menu_populate(const Game *const *list, int n);
 
+// The other half of the shelf's memory. The platform calls this as a cartridge plugs in, with the
+// name of the game being launched; the menu writes it down and menu_populate pulls that cart to the
+// front of the shelf next time. Names, not indices — a roster gains and loses cartridges, and an
+// index saved yesterday points at whatever happens to be third today.
+// 🔴 The platform must NOT call it in --headless / --ppm / --dump. A render or a determinism check
+// is an observation, and an observation that writes a file changes the thing it is measuring: the
+// next headless run would start from a different shelf order than the last one.
+void menu_note_launch(const char *name);
+
 // A single-player game reads one control scheme, but a player reaches for WASD or the arrows without
 // thinking. Merge both pads into one so either drives, with Space OR Enter as the action button —
 // so no single-player cartridge has to care which half of the keyboard the player picked.
