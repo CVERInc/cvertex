@@ -143,10 +143,14 @@ int main(int argc, char **argv) {
     // Built with -mwindows, so a double-click opens no console — just the game window. But if this
     // WAS launched from a terminal, attach to it so --headless and --help still print there (the
     // cross-platform determinism check needs its stdout). No parent console = nothing attaches.
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-        freopen("CONOUT$", "w", stdout);
-        freopen("CONOUT$", "w", stderr);
-    }
+    // Only reopen a stream onto the console device if it has no inherited handle: a pipe or a
+    // redirected file IS a console the parent already chose for us, and freopen("CONOUT$", ...)
+    // unconditionally would throw that choice away and print to a console window nobody reads.
+    AttachConsole(ATTACH_PARENT_PROCESS);
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (hOut == NULL || hOut == INVALID_HANDLE_VALUE) freopen("CONOUT$", "w", stdout);
+    HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+    if (hErr == NULL || hErr == INVALID_HANDLE_VALUE) freopen("CONOUT$", "w", stderr);
     int rw = 640, rh = 360;
     const char *runmode = 0; int modearg = 0;
     const char *keys = 0;
@@ -197,6 +201,7 @@ int main(int argc, char **argv) {
         for (int i = 0; i < g_fbw * g_fbh; i++) ink = ink * 3 + g_fb[i];
         printf("game=%s frames=%d sim_checksum=%llu fb_checksum=%llu\n",
                g->name, n, (unsigned long long)g->checksum(), (unsigned long long)ink);
+        fflush(stdout); // under a pipe stdout is fully buffered; make sure the harness sees it
         return 0;
     }
 
