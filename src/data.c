@@ -127,13 +127,14 @@ long cvx_exe_size(void) {
     g_exe_size = 0;
     char path[1024];
     if (!exe_path(path, sizeof path)) return g_exe_size;
-#ifdef _WIN32
-    struct _stat64 st;
-    if (_stat64(path, &st) == 0) g_exe_size = (long)st.st_size;
-#else
-    struct stat st;
-    if (stat(path, &st) == 0) g_exe_size = (long)st.st_size;
-#endif
+    // One portable path for all three platforms: fopen + seek to end + tell. struct _stat64 needs a
+    // header the zig/mingw Windows build does not pull in here (the CI was red on it); stdio is
+    // everywhere. Read-only; the file is our own executable.
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        if (fseek(f, 0, SEEK_END) == 0) { long n = ftell(f); if (n > 0) g_exe_size = n; }
+        fclose(f);
+    }
     return g_exe_size;
 }
 
