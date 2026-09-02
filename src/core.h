@@ -168,6 +168,11 @@ const char *cvx_data_path(const char *file, int for_write);
 // answer without knowing where it tried. Never creates anything.
 const char *cvx_data_dir(void);
 
+// The size, in bytes, of the running executable itself — "how big is this cartridge, really" —
+// or 0 if the platform won't say. stat()s the same path exe_dir()'s platform branches resolve,
+// once, and caches the result: it must not change frame to frame within one run.
+long cvx_exe_size(void);
+
 // ---- depth ------------------------------------------------------------------
 // 🔴 A painter's algorithm sorted per triangle is not a depth test, it's a guess that
 // usually agrees with one. Two triangles whose average depths cross swap places, and a

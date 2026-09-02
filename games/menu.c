@@ -1075,6 +1075,26 @@ static void crt_off(int f) {
     }
 }
 
+// A 3.5" HD floppy's usable capacity, in bytes — the console-level cap the byte-craft line
+// measures the running executable against. Not the size of anything we ship; just the era's unit.
+#define CVX_FLOPPY_BYTES 1474560
+
+// Renders n right into buf with a space every three digits ("1 097 832" — text.c's 5x7 font has
+// no comma glyph, checked in text.c, so a space stands in). buf must hold at least 24 bytes.
+static void fmt_thousands(long n, char *buf, size_t bufsz) {
+    char digits[16]; int nd = 0;
+    if (n <= 0) { digits[nd++] = '0'; }
+    else while (n > 0 && nd < (int)sizeof digits) { digits[nd++] = (char)('0' + n % 10); n /= 10; }
+    char out[24]; int o = 0;
+    for (int i = nd - 1; i >= 0; i--) {
+        out[o++] = digits[i];
+        int left = i;                          // digits still to come after this one
+        if (left > 0 && left % 3 == 0) out[o++] = ' ';
+    }
+    out[o] = 0;
+    snprintf(buf, bufsz, "%s", out);
+}
+
 // The shelf proper: the rack of carts, the CVERTEX wordmark, the controls hint. Factored out so the
 // CRT power-off can render the live shelf and then collapse it in place.
 static void draw_shelf(void) {
@@ -1107,6 +1127,23 @@ static void draw_shelf(void) {
     text_draw(cx - text_width(hintA, s) / 2, g_fbh - 49 * s, s, hintA, 1);
     text_draw(cx - text_width(hintB, s) / 2, g_fbh - 37 * s, s, hintB, 1);
     text_draw(cx - text_width(hintC, s) / 2, g_fbh - 25 * s, s, hintC, 1);   // ~9% off the bottom, matching the title's top margin
+    // The byte-craft line: how big this cartridge actually is, against the 3.5" HD floppy's
+    // capacity — a console-era brag, in the same readable secondary grey as the hints above it.
+    // cvx_exe_size() resolves and caches once at init (see data.c), so the number is stable
+    // frame to frame within a run; if the platform won't say (returns 0) the line draws nothing
+    // rather than print a lie.
+    long exe_bytes = cvx_exe_size();
+    if (exe_bytes > 0) {
+        char have[24], cap[24], line[64];
+        fmt_thousands(exe_bytes, have, sizeof have);
+        fmt_thousands(CVX_FLOPPY_BYTES, cap, sizeof cap);
+        snprintf(line, sizeof line, "THIS CARTRIDGE  %s OF %s BYTES", have, cap);
+        // One row below the third hint; still measured against the framebuffer so it never
+        // clips at 640x360 or any other size — same discipline as the hint rows above.
+        int w = text_width(line, s);
+        if (cx - w / 2 >= 0 && cx + w / 2 <= g_fbw)
+            text_draw(cx - w / 2, g_fbh - 13 * s, s, line, 1);
+    }
 }
 
 // The OPTIONS panel: a raised plate in the console's palette, a vertical list of settings with the
