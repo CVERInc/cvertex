@@ -167,6 +167,11 @@ int main(int argc, char **argv) {
             if (!g) { fprintf(stderr, "cvertex: no game called '%s'\n", argv[a+1]); return 1; }
             a++;
         }
+        // --version: the same two lines mac.c prints (the build, and where the saves live). Without
+        // this branch the flag fell through to the generic "-x <n>" rule, was not consumed (no number
+        // follows it), and the game simply opened its window — which is a hang on any headless
+        // machine, and a surprise for the README's "run with --version to print exactly where".
+        else if (!strcmp(argv[a], "--version")) { printf("cvertex %s\ndata: %s\n", CVERTEX_VERSION, cvx_data_dir()); fflush(stdout); return 0; }
         else if (argv[a][0] == '-' && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
     g_headless = (runmode != 0);
