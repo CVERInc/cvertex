@@ -118,10 +118,11 @@ uint8_t  g_esc;        // one-frame edge: platform pulses (Esc / CV_ESC_AT), the
 int      g_menu_return;   // platform -> menu: returned from a game, play the insert in reverse (all platforms link)
 int      g_quit;          // menu -> platform: the CRT power-off finished, stop the loop
 // The OPTIONS panel's settings. 🔴 Zero-init IS the default for every one — off / solo /
-// windowed / first-person — so the synth.c non-zero-initializer lesson holds (these live in
-// __bss, nothing on disk) AND "untouched == today's behaviour" is true by construction. The
-// menu raises g_crt_off to 1 at init() (the collapse plays by default); mac.c sets g_fullscreen
-// from the --fullscreen flag. Both are runtime assignments, never data-segment initializers.
+// windowed — so the synth.c non-zero-initializer lesson holds (these live in __bss, nothing on
+// disk) AND "untouched == today's behaviour" is true by construction. The menu raises g_crt_off
+// and g_cam_chase to 1 at init() (the collapse plays, the camera chases, by default); mac.c sets
+// g_fullscreen from the --fullscreen flag. All three are runtime assignments, never data-segment
+// initializers.
 int      g_gentle, g_coop, g_fullscreen, g_crt_off, g_cam_chase, g_headless;
 
 void fb_resize(int w, int h) {

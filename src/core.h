@@ -144,7 +144,7 @@ extern int g_gentle;      // GENTLE MODE: a cartridge's tamed creatures never st
 extern int g_coop;        // CO-OP at launch: 0 SOLO, 1 HOST, 2 JOIN — the platform stands up lockstep net on the next game
 extern int g_fullscreen;  // FULLSCREEN want: the platform toggles the live window to match when it changes (0 = windowed)
 extern int g_crt_off;     // CRT POWER-OFF flourish on Esc-quit: 1 = the tube collapse plays, 0 = quit straight to black
-extern int g_cam_chase;   // camera default a 3D game may read: 0 = first-person (today), 1 = chase
+extern int g_cam_chase;   // camera default a 3D game may read: 1 = chase (the menu's default since 2026-09-03), 0 = first-person
 extern int g_headless;    // 1 under --headless / --ppm / --dump: observe, never persist
 
 // ---- where the console keeps its files --------------------------------------

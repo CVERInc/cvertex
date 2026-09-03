@@ -705,9 +705,12 @@ static void init(void) {
     g_opt_sel = g_opt_prev_x = g_opt_prev_y = 0;
     // The OPTIONS settings default at runtime (never a data-segment initializer). g_crt_off = 1 means
     // the tube-collapse plays on Esc-quit — today's behaviour; the panel can switch it off. g_gentle /
-    // g_coop / g_cam_chase keep their zero (off / solo / first-person) default; g_fullscreen is owned by
-    // the platform (the --fullscreen flag), so the menu reads it but doesn't stamp it here.
+    // g_coop keep their zero (off / solo) default; g_fullscreen is owned by the platform (the
+    // --fullscreen flag), so the menu reads it but doesn't stamp it here.
+    // g_cam_chase = 1: a 3D game's default view is the CHASE camera (2026-09-03 — you see your own
+    // body by default; "first-person" stays one toggle away in this panel).
     g_crt_off = 1;
+    g_cam_chase = 1;
     g_scroll = (int32_t)g_sel << 16;                 // g_sel is a persisting static → the shelf lands where we left it
     for (int i = 0; i < 256; i++) g_pal[i] = 0xFF000000;
     g_pal[0] = 0xFF0C0B14;   // deep background
