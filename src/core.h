@@ -126,7 +126,7 @@ extern uint8_t g_debug_toggle;
 
 // One-frame edge latch for the 'N' key (keycode 45 on macOS). Same bargain as the view/help/debug
 // latches — the platform pulses it on the keydown edge; a cartridge consumes it for its OWN settings
-// surface (waxwing's manual panel uses it for NEW GAME). Draw-side comfort, never in the Input
+// surface (a cartridge's own manual panel might offer NEW GAME on it). Draw-side comfort, never in
 // struct, never hashed — a cartridge that never reads it is byte-identical to before.
 extern uint8_t g_newgame_toggle;
 
