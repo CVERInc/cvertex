@@ -30,6 +30,10 @@ static int g_ret, g_poff;                // reverse-insert countdown; CRT power-
 static int g_flip, g_fliptarget, g_prev_up;   // flip the selected cart over (Up) to read its developer
 static int g_spin_x, g_spin_y, g_prev_insp;   // (retired) INSPECT free-spin state; kept so the idle-decay math below no-ops harmlessly
 static int g_prev_jump;                  // Space rising-edge latch: open OPTIONS from the shelf / back out of it
+// The shelf's own manual: an overlay on the shelf, not a phase of its own — opened and closed by
+// g_help_toggle (core.h), the SAME one-frame platform edge the cartridge's own manual consumes, so
+// the same key does the same thing on both screens. See draw_manual() and its toggle in tick().
+static int g_manual;
 // OPTIONS panel: the rows, the cursor, and the Left/Right + Up/Down edge latches.
 // 🔴 CO-OP IS BUILD-GATED (-DCVX_NET), and it is off by default because the row FREEZES the console.
 // Choosing HOST and launching lands in net_host(), whose accept() is a blocking call with no timeout
@@ -755,6 +759,7 @@ static void init(void) {
     g_spin_x = g_spin_y = g_prev_insp = 0;
     g_prev_jump = 0;
     g_opt_sel = g_opt_prev_x = g_opt_prev_y = 0;
+    g_manual = 0;                                     // closed by default, same as the cartridge's
     // The OPTIONS settings default at runtime (never a data-segment initializer). g_crt_off = 1 means
     // the tube-collapse plays on Esc-quit — today's behaviour; the panel can switch it off. g_gentle /
     // g_coop keep their zero (off / solo) default; g_fullscreen is owned by the platform (the
@@ -790,6 +795,11 @@ static void init(void) {
     // still boots normally.
     if (g_menu_return) { g_menu_return = 0; g_phase = P_RETURN; g_ret = RET_LEN; }
     else                 g_phase = P_BOOT;
+    // dev: force the shelf's manual open for a --ppm shot. The real door is g_help_toggle below —
+    // this exists only because '/' is a real keycode (mac.c) with no --keys character, so a headless
+    // render has no way to press it. Gated behind g_headless so it can never leave a leftover env
+    // var able to pin a real interactive session's manual open; delete it once --ppm can script '/'.
+    if (g_headless && getenv("CV_MENU_MANUAL")) g_manual = 1;
 }
 
 static void tick(const Input in[2]) {
@@ -804,6 +814,7 @@ static void tick(const Input in[2]) {
         // power the console off. Everywhere else Esc powers off: normally that's the CRT tube collapse,
         // but if the player switched CRT POWER-OFF off in OPTIONS we quit straight to black instead.
         if (g_phase == P_OPTIONS) { g_phase = P_SHELF; g_cool = 4; beep(4, 58, 90); }
+        else if (g_phase == P_SHELF && g_manual) { g_manual = 0; beep(4, 58, 90); }   // Esc backs out of the manual too, same as OPTIONS
         else if (g_phase != P_POWEROFF) {
             beep(3, 45, 200);
             if (g_crt_off) { g_phase = P_POWEROFF; g_poff = 0; }
@@ -863,6 +874,16 @@ static void tick(const Input in[2]) {
 
     int32_t target = (int32_t)g_sel << 16;
     g_scroll += (target - g_scroll) >> 3;
+    // '/' (or '?') opens the shelf's own manual — g_help_toggle is a platform-pulsed one-frame edge
+    // (core.h), the exact same signal the cartridge's own manual consumes, so the same key does the
+    // same thing on both screens. Browsing/flipping/inserting/OPTIONS are all suspended while it's
+    // open, same as OPTIONS suspends them (Esc closes it instead of powering off — handled above).
+    if (g_help_toggle) { g_manual = !g_manual; g_help_toggle = 0; beep(4, 58, 90); }
+    if (g_manual) {
+        g_prev_jump = (in[0].jump || in[1].jump);   // keep the latches honest so a held key can't
+        g_prev_up   = (in[0].y > 0) || (in[1].y > 0);   // fire the instant the manual closes
+        return;
+    }
     int x = in[0].x + in[1].x;
     int y = in[0].y + in[1].y;
     // SPACE now opens the OPTIONS panel (rising edge, so a held key opens it once). It used to hold-to
@@ -1130,8 +1151,49 @@ static void crt_off(int f) {
     }
 }
 
-// The shelf proper: the rack of carts, the CVERTEX wordmark, the controls hint. Factored out so the
-// CRT power-off can render the live shelf and then collapse it in place.
+// The shelf's own manual — everything that used to sit on the shelf in three rows of text, now
+// behind the same "?" the cartridge itself uses. Model: the cartridge's own manual — a small
+// bordered plate, closed by default, same open/close key. engine/ can't literally share a
+// cartridge's private draw code across the module boundary, so this MIRRORS its treatment with the
+// primitives this very file already draws a panel with (poly_fill + text_draw — see draw_options
+// just below), rather than inventing a third look: a thin dim-ink border around a plain black
+// plate — the reference page, not the lit purple console screen OPTIONS is — title bright, rows in
+// the same secondary ink the old hint rows always used. Sized to its own content the same way too:
+// the row pitch yields to the frame instead of the frame yielding to the pitch, so it can't run off
+// a short screen no matter how many rows end up in it.
+static const char *MAN_ROW[7] = {
+    "LEFT RIGHT BROWSE", "UP FLIP", "DOWN INSERT", "SPACE OPTIONS",
+    "ESC POWER OFF", "IN GAME ESC BACK HERE", "? OR /  CLOSE",
+};
+static void draw_manual(void) {
+    int s = g_fbh / 180; if (s < 1) s = 1;
+    int cx = g_fbw / 2;
+    int rows = (int)(sizeof MAN_ROW / sizeof MAN_ROW[0]);
+    int content_w = text_width("MANUAL", s * 2);
+    for (int i = 0; i < rows; i++) { int w = text_width(MAN_ROW[i], s); if (w > content_w) content_w = w; }
+    int pw = content_w + 32 * s;                             // 16*s margin each side, same as OPTIONS' plate
+    int pitch = 10 * s;
+    if (26 * s + rows * pitch + 6 * s > g_fbh) pitch = (g_fbh - 32 * s) / rows;   // yield to the frame
+    int ph = 26 * s + rows * pitch + 6 * s;                  // header + one line per row + bottom margin
+    int px0 = cx - pw / 2, py0 = g_fbh / 2 - ph / 2;
+    int16_t frame[8] = { (int16_t)px0, (int16_t)py0, (int16_t)(px0 + pw), (int16_t)py0,
+                         (int16_t)(px0 + pw), (int16_t)(py0 + ph), (int16_t)px0, (int16_t)(py0 + ph) };
+    poly_fill(frame, 4, 1);                                  // thin border, secondary ink
+    int16_t plate[8] = { (int16_t)(px0 + 1), (int16_t)(py0 + 1), (int16_t)(px0 + pw - 1), (int16_t)(py0 + 1),
+                         (int16_t)(px0 + pw - 1), (int16_t)(py0 + ph - 1), (int16_t)(px0 + 1), (int16_t)(py0 + ph - 1) };
+    poly_fill(plate, 4, 0);                                  // black fill, one pixel in from the border
+    text_draw(cx - text_width("MANUAL", s * 2) / 2, py0 + 8 * s, s * 2, "MANUAL", 2);
+    for (int i = 0; i < rows; i++)
+        text_draw(px0 + 16 * s, py0 + 26 * s + i * pitch, s, MAN_ROW[i], 1);
+}
+
+// The shelf proper: the rack of carts, the CVERTEX wordmark, and — with one exception — nothing
+// else. The exception is how to START: a first-time visitor doesn't know DOWN inserts a cartridge,
+// and hiding that behind a key you must first discover was the one thing this shelf must never do.
+// Everything else (browse, flip, OPTIONS, power off, the in-game way back) moved into the manual
+// above, opened the same way and announced the same way the cartridge announces its own — a small
+// "?" in a corner, same size, same ink, same placement, so the two screens read as the same machine.
+// Factored out so the CRT power-off can render the live shelf and then collapse it in place.
 static void draw_shelf(void) {
     int s = g_fbh / 180; if (s < 1) s = 1;
     int cx = g_fbw / 2;
@@ -1140,28 +1202,16 @@ static void draw_shelf(void) {
     // resolution, which crowded the top edge (and, windowed, the title bar). A clean 7% band keeps
     // ink off the bleed. Same reasoning as game.h's hud_top(): text near an edge reads as spilling.
     text_draw(cx - text_width("CVERTEX", s * 2) / 2, g_fbh * 7 / 100, s * 2, "CVERTEX", 4);
-    // The controls hint, two centred rows. As one line (~69 chars) it was 826px wide on a 640px
-    // framebuffer — both ends ran off-screen (BROWSE clipped left, ESC POWER clipped right). Split so
-    // each row fits with margin at any sane resolution, and drawn in the readable secondary grey.
-    // 🔴 IT NOW SAYS WHAT THE KEYS DO. "ARROWS BROWSE" was wrong in a way that costs a first-time
-    // player the whole shelf: Up and Down are not browse, they are flip and insert, so anyone who
-    // read the hint and pressed Up to "scroll" turned a cart over, and anyone who pressed Down
-    // launched a game they had not chosen. Only Left and Right browse, so the hint says so.
-    // The third row is the one thing the shelf never told anyone: how to get BACK here from inside
-    // a game. Esc has done it since the two-stage Esc landed, and nothing on screen said so — the
-    // player's only known exit was the one that quits the program.
-    // Word arrows, not glyph arrows: text.c's 5x7 font has A-Z, 0-9 and - . : / ? and no arrowheads
-    // (checked, not assumed), and a hint that renders as blank cells is worse than a longer one.
-    static const char *hintA = "LEFT RIGHT BROWSE    UP FLIP";
-    static const char *hintB = "DOWN INSERT    SPACE OPTIONS";
-    static const char *hintC = "ESC POWER OFF    IN GAME ESC BACK HERE";
-    // Lifted clear of the bottom edge: the console's deck now breaks into frame down there, and grey
-    // hint text laid over grey moulding is the one place this screen stops being instantly readable.
-    // Three rows now, so the stack starts one 12*s step higher; no row is wider than the 38 characters
-    // the old first row already was, so nothing newly reaches for the edges.
-    text_draw(cx - text_width(hintA, s) / 2, g_fbh - 49 * s, s, hintA, 1);
+    if (g_manual) { draw_manual(); return; }                 // the manual replaces the hints below, not stacks with them
+    // The one line the shelf still prints unprompted — same place, same ink it always had, only its
+    // neighbours gone (they're the manual now).
+    static const char *hintB = "DOWN INSERT";
     text_draw(cx - text_width(hintB, s) / 2, g_fbh - 37 * s, s, hintB, 1);
-    text_draw(cx - text_width(hintC, s) / 2, g_fbh - 25 * s, s, hintC, 1);   // ~9% off the bottom, matching the title's top margin
+    // The one affordance for everything else: a dim "?" in the corner. Mirrors the cartridge's own —
+    // same size (s, the body scale, not the title's 2s), same secondary ink (1, this palette's
+    // counterpart of the cartridge's dim text), same bottom-left corner and offset — so pressing '?'
+    // here does exactly what it does over there.
+    text_draw(4 * s, g_fbh - 10 * s, s, "?", 1);
 }
 
 // The OPTIONS panel: a raised plate in the console's palette, a vertical list of settings with the
