@@ -631,23 +631,59 @@ static void build_names(void) {
     }
 }
 
-// The credit on the flip side, for the selected cart only — you can only turn one cart over, and
-// only the one you are holding. Re-baked when the selection moves.
+// Renders n right into buf with a space every three digits ("1 097 832" — text.c's 5x7 font has
+// no comma glyph, checked in text.c, so a space stands in). buf must hold at least 24 bytes.
+static void fmt_thousands(long n, char *buf, size_t bufsz) {
+    char digits[16]; int nd = 0;
+    if (n <= 0) { digits[nd++] = '0'; }
+    else while (n > 0 && nd < (int)sizeof digits) { digits[nd++] = (char)('0' + n % 10); n /= 10; }
+    char out[24]; int o = 0;
+    for (int i = nd - 1; i >= 0; i--) {
+        out[o++] = digits[i];
+        int left = i;                          // digits still to come after this one
+        if (left > 0 && left % 3 == 0) out[o++] = ' ';
+    }
+    out[o] = 0;
+    snprintf(buf, bufsz, "%s", out);
+}
+
+// The flip side, for the selected cart only — you can only turn one cart over, and only the one
+// you are holding. Re-baked when the selection moves. Two things can live here: who made it, and
+// how big it is — a cartridge's back is where a real one carries its byline and its spec plate, so
+// both read as that little world's own print, not a HUD. Either line stands alone, centred on the
+// label the way the credit always was; if both are present they split the label instead of colliding.
 static void build_dev(const char *author) {
     tb_begin(&txt_m, txt_v, txt_t, TMAXV, TMAXT);
     int32_t availw = g_lw * 2 * 92 / 100;
     int32_t cyc    = (g_lt + g_lb) / 2;
-    // An unsigned cartridge gets a BLANK back, not a byline reading "BY ANONYMOUS". game.h says a
-    // NULL author "reads as anonymous", and the shelf took that literally — so every cart nobody had
+    int32_t z      = g_ld + U * 7 / 100;
+    // An unsigned cartridge gets a BLANK byline, not one reading "BY ANONYMOUS". game.h says a NULL
+    // author "reads as anonymous", and the shelf took that literally — so every cart nobody had
     // signed yet wore a credit line naming a person who does not exist, which looks like a shipped
     // placeholder rather than an absence. Nothing to say, so say nothing.
-    if (!author || !author[0]) return;
-    static char dev[40];
-    int j = 0; dev[j++] = 'B'; dev[j++] = 'Y'; dev[j++] = ' ';
-    const char *a = author;
-    for (int i = 0; a[i] && j < 38; i++) dev[j++] = a[i];
-    dev[j] = 0;
-    emit_text(dev, (g_ld + U * 7 / 100), 32767, 1, 144, availw, cyc);      // BACK: BY <author>, light ink, mirrored
+    int has_author = author && author[0];
+    // cvx_exe_size() resolves and caches once at init (see data.c), so the number is stable frame
+    // to frame within a run; if the platform won't say (returns 0) this line draws nothing too,
+    // rather than print "0 BYTES".
+    long exe_bytes = cvx_exe_size();
+    int has_size = exe_bytes > 0;
+    // Splitting the label is only needed when both lines are present; either one alone still
+    // centres on the label's own vertical middle, exactly where the single credit line always sat.
+    int32_t split = (has_author && has_size) ? (g_lt - g_lb) / 4 : 0;
+    if (has_author) {
+        static char dev[40];
+        int j = 0; dev[j++] = 'B'; dev[j++] = 'Y'; dev[j++] = ' ';
+        const char *a = author;
+        for (int i = 0; a[i] && j < 38; i++) dev[j++] = a[i];
+        dev[j] = 0;
+        emit_text(dev, z, 32767, 1, 144, availw, cyc + split);   // BY <author>, developer ink, mirrored
+    }
+    if (has_size) {
+        char have[24], line[32];
+        fmt_thousands(exe_bytes, have, sizeof have);
+        snprintf(line, sizeof line, "%s BYTES", have);
+        emit_text(line, z, 32767, 1, 144, availw, cyc - split);  // the spec plate: this cart's own size, same ink
+    }
 }
 
 static int clamp01(int t) { return t < 0 ? 0 : (t > 1024 ? 1024 : t); }
@@ -1078,26 +1114,6 @@ static void crt_off(int f) {
     }
 }
 
-// A 3.5" HD floppy's usable capacity, in bytes — the console-level cap the byte-craft line
-// measures the running executable against. Not the size of anything we ship; just the era's unit.
-#define CVX_FLOPPY_BYTES 1474560
-
-// Renders n right into buf with a space every three digits ("1 097 832" — text.c's 5x7 font has
-// no comma glyph, checked in text.c, so a space stands in). buf must hold at least 24 bytes.
-static void fmt_thousands(long n, char *buf, size_t bufsz) {
-    char digits[16]; int nd = 0;
-    if (n <= 0) { digits[nd++] = '0'; }
-    else while (n > 0 && nd < (int)sizeof digits) { digits[nd++] = (char)('0' + n % 10); n /= 10; }
-    char out[24]; int o = 0;
-    for (int i = nd - 1; i >= 0; i--) {
-        out[o++] = digits[i];
-        int left = i;                          // digits still to come after this one
-        if (left > 0 && left % 3 == 0) out[o++] = ' ';
-    }
-    out[o] = 0;
-    snprintf(buf, bufsz, "%s", out);
-}
-
 // The shelf proper: the rack of carts, the CVERTEX wordmark, the controls hint. Factored out so the
 // CRT power-off can render the live shelf and then collapse it in place.
 static void draw_shelf(void) {
@@ -1130,23 +1146,6 @@ static void draw_shelf(void) {
     text_draw(cx - text_width(hintA, s) / 2, g_fbh - 49 * s, s, hintA, 1);
     text_draw(cx - text_width(hintB, s) / 2, g_fbh - 37 * s, s, hintB, 1);
     text_draw(cx - text_width(hintC, s) / 2, g_fbh - 25 * s, s, hintC, 1);   // ~9% off the bottom, matching the title's top margin
-    // The byte-craft line: how big this cartridge actually is, against the 3.5" HD floppy's
-    // capacity — a console-era brag, in the same readable secondary grey as the hints above it.
-    // cvx_exe_size() resolves and caches once at init (see data.c), so the number is stable
-    // frame to frame within a run; if the platform won't say (returns 0) the line draws nothing
-    // rather than print a lie.
-    long exe_bytes = cvx_exe_size();
-    if (exe_bytes > 0) {
-        char have[24], cap[24], line[64];
-        fmt_thousands(exe_bytes, have, sizeof have);
-        fmt_thousands(CVX_FLOPPY_BYTES, cap, sizeof cap);
-        snprintf(line, sizeof line, "THIS CARTRIDGE  %s OF %s BYTES", have, cap);
-        // One row below the third hint; still measured against the framebuffer so it never
-        // clips at 640x360 or any other size — same discipline as the hint rows above.
-        int w = text_width(line, s);
-        if (cx - w / 2 >= 0 && cx + w / 2 <= g_fbw)
-            text_draw(cx - w / 2, g_fbh - 13 * s, s, line, 1);
-    }
 }
 
 // The OPTIONS panel: a raised plate in the console's palette, a vertical list of settings with the
