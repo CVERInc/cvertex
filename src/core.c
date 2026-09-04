@@ -114,6 +114,7 @@ int      g_digit = -1; // number-row pulse: 0..9 the frame its key goes down, el
 uint8_t  g_view_toggle;// one-frame edge: platform pulses (Tab / --view), a game consumes it
 uint8_t  g_help_toggle;// one-frame edge: platform pulses ('/' keycode 44), a game toggles its manual
 uint8_t  g_debug_toggle;// one-frame edge: platform pulses (F3), a game toggles its dev debug overlay
+uint8_t  g_newgame_toggle;// one-frame edge: platform pulses ('N' keycode 45 / CV_NGAME_AT), a game consumes it for its own settings
 uint8_t  g_esc;        // one-frame edge: platform pulses (Esc / CV_ESC_AT), the shell routes it
 int      g_menu_return;   // platform -> menu: returned from a game, play the insert in reverse (all platforms link)
 int      g_quit;          // menu -> platform: the CRT power-off finished, stop the loop

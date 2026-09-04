@@ -161,6 +161,10 @@ static void pump_events(id app, id mode) {
             if (kc == 44 && t == 10 && !g_keys[44]) g_help_toggle = 1;
             // F3 (keycode 99) → the dev debug overlay, edge-only like the rest (Minecraft's binding).
             if (kc == 99 && t == 10 && !g_keys[99]) g_debug_toggle = 1;
+            // N (keycode 45) → a one-frame edge pulse, edge-only like the rest; free of every other
+            // binding (WASD/E, Tab, '/', F3, the number row, arrows, Space) so a cartridge can claim
+            // it for its own settings surface without stealing anyone else's key.
+            if (kc == 45 && t == 10 && !g_keys[45]) g_newgame_toggle = 1;
             // Number row 1..9,0 → a one-frame digit pulse on the keydown EDGE (like Tab/Esc, so a held
             // key can't strobe). A cartridge can read g_digit for a dev-gated debug shortcut; it's never
             // in the Input struct, so it steers no deterministic sim.
@@ -477,7 +481,20 @@ int main(int argc, char **argv) {
         // CV_ESC_AT=<frame> pulses the Esc latch at that frame so the shell's power-off (in the
         // menu) or return-to-console routing is renderable headlessly. Dev hook, --ppm only.
         const char *escat = getenv("CV_ESC_AT"); int esc_at = escat ? atoi(escat) : -1;
-        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); SCROLL(f); if (f == esc_at) g_esc = 1; g->tick(in); }
+        // CV_NGAME_AT=<f1>[,<f2>] pulses the 'N' latch at those frames — same bargain as CV_ESC_AT,
+        // for a key with no window to press it in headlessly. Dev hook, --ppm only.
+        int ngame_at1 = -1, ngame_at2 = -1;
+        { const char *ng = getenv("CV_NGAME_AT");
+          if (ng) { ngame_at1 = atoi(ng); const char *c = strchr(ng, ','); if (c) ngame_at2 = atoi(c + 1); } }
+        // CV_HELP_AT=<f1>[,<f2>] pulses the '/' manual latch the same way — lets a headless render
+        // open the manual, act, and close it again, all from one scripted run.
+        int help_at1 = -1, help_at2 = -1;
+        { const char *hp = getenv("CV_HELP_AT");
+          if (hp) { help_at1 = atoi(hp); const char *c = strchr(hp, ','); if (c) help_at2 = atoi(c + 1); } }
+        for (int f = 0; f < n; f++) { SCRIPT(f); MOUSE(f); VIEW(f); SCROLL(f); if (f == esc_at) g_esc = 1;
+            if (f == ngame_at1 || f == ngame_at2) g_newgame_toggle = 1;
+            if (f == help_at1 || f == help_at2) g_help_toggle = 1;
+            g->tick(in); }
         g->draw();
         for (int i = 0; i < g_fbw * g_fbh; i++) g_rgba[i] = g_pal[g_fb[i]];
         if (g_present_fx) g_present_fx(g_rgba, g_fbw, g_fbh);   // screenshots see exactly what the window sees

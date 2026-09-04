@@ -124,6 +124,12 @@ extern uint8_t g_help_toggle;
 // Draw-side comfort, never in the Input struct, never hashed: it steers no deterministic sim.
 extern uint8_t g_debug_toggle;
 
+// One-frame edge latch for the 'N' key (keycode 45 on macOS). Same bargain as the view/help/debug
+// latches — the platform pulses it on the keydown edge; a cartridge consumes it for its OWN settings
+// surface (waxwing's manual panel uses it for NEW GAME). Draw-side comfort, never in the Input
+// struct, never hashed — a cartridge that never reads it is byte-identical to before.
+extern uint8_t g_newgame_toggle;
+
 // ---- Esc: the two-stage back button -----------------------------------------
 // A one-frame edge latch, the same bargain as the view toggle: the platform PULSES it on an
 // Esc keydown edge (mac.c keycode 53; --ppm/--dump can pulse it from CV_ESC_AT for headless
