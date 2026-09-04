@@ -96,48 +96,6 @@ static int exe_dir(char *out, size_t n) {
 #endif
 }
 
-// The running executable's own full path (not its directory), or 0 if the platform won't say.
-// Same three branches as exe_dir() above, minus the "chop to a directory" step — the shelf wants
-// to stat() the binary itself, not the folder it lives in.
-static int exe_path(char *out, size_t n) {
-#if defined(__APPLE__)
-    char raw[1024]; uint32_t sz = (uint32_t)sizeof raw;
-    if (_NSGetExecutablePath(raw, &sz) != 0) return 0;
-    char real[1024];
-    if (!realpath(raw, real)) { size_t l = strlen(raw); if (l >= sizeof real) return 0; memcpy(real, raw, l + 1); }
-    if (strlen(real) >= n) return 0;
-    memcpy(out, real, strlen(real) + 1);
-    return 1;
-#elif defined(_WIN32)
-    DWORD got = GetModuleFileNameA(NULL, out, (DWORD)n);
-    return got != 0 && got < n;
-#else
-    ssize_t got = readlink("/proc/self/exe", out, n - 1);
-    if (got <= 0 || (size_t)got >= n - 1) return 0;
-    out[got] = 0;
-    return 1;
-#endif
-}
-
-// cvx_exe_size(): resolved once, cached — read at init, never re-stat'd, so the number the shelf
-// shows cannot drift frame to frame within one run (a --headless run must be byte-identical twice).
-static long g_exe_size = -1;   // -1 = not yet resolved; 0 = resolved, unknown
-long cvx_exe_size(void) {
-    if (g_exe_size >= 0) return g_exe_size;
-    g_exe_size = 0;
-    char path[1024];
-    if (!exe_path(path, sizeof path)) return g_exe_size;
-    // One portable path for all three platforms: fopen + seek to end + tell. struct _stat64 needs a
-    // header the zig/mingw Windows build does not pull in here (the CI was red on it); stdio is
-    // everywhere. Read-only; the file is our own executable.
-    FILE *f = fopen(path, "rb");
-    if (f) {
-        if (fseek(f, 0, SEEK_END) == 0) { long n = ftell(f); if (n > 0) g_exe_size = n; }
-        fclose(f);
-    }
-    return g_exe_size;
-}
-
 // The per-user data directory this platform keeps for an application, by its own convention.
 static int user_dir(char *out, size_t n) {
 #if defined(_WIN32)

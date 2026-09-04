@@ -38,6 +38,17 @@ typedef struct {
     // cartridge written before this field existed still compiles — its author is simply NULL —
     // and adding it never disturbs the positional initializers already out there.
     const char *author;
+
+    // This cartridge's own compiled size, in bytes — its own code and data, not the engine every
+    // cartridge shares and not the disk file's whole size (the generated manifest that fills this
+    // in explains exactly what's summed and why: tools/gen-games.sh, the comment above where it
+    // measures). A cartridge's own .c cannot know its own compiled size while compiling itself, so
+    // this is 0 in every cartridge's own initializer; the platform patches in the real number once
+    // per cartridge from that generated manifest before the shelf ever draws. 0 also covers "the
+    // build could not measure it" — read it as "unknown", never as "zero bytes", and draw nothing
+    // for it. Goes LAST for the same reason author does, right above: nothing existing has to
+    // change to keep compiling.
+    long bytes;
 } Game;
 
 // A game may ask to be replaced by another. The platform layer honours it between frames

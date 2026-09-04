@@ -13,6 +13,7 @@
 #include "text.h"
 #include "g3d.h"
 #include "version.h"   // CVERTEX_VERSION — printed in the boot screen's corner
+#include "games.gen.h" // GEN_BYTES — each cartridge's own compiled size, same order as the roster
 
 #define U (1 << 16)
 
@@ -62,6 +63,13 @@ static int g_n;
 // wants a different order from it — most recently played first, the way a console you actually use
 // puts the last cart back on top of the pile instead of filing it alphabetically.
 static const Game *g_order[MAXCART];
+// g_order points into HERE, not at the roster's own const Game objects — those are true C `const`
+// (clang puts them in a read-only segment; writing through a cast would be undefined behaviour, and
+// on this platform a write to __TEXT actually faults). menu_populate takes a value COPY of each
+// cartridge and patches the copy's `bytes` field from GEN_BYTES before g_order ever points at it,
+// which is also the only place a cartridge's own byte count gets attached to it at all — see
+// tools/gen-games.sh's own comment for how that number was measured.
+static Game g_cart[MAXCART];
 #define MENU_SAV "menu.sav"          // one line: the name of the last cartridge launched
 
 // Clamp the shelf to what the static cart-mesh arrays can hold. Nav wraps on g_n and the render caps
@@ -70,7 +78,15 @@ static const Game *g_order[MAXCART];
 // so a ghost can't exist; MAXCART itself has headroom so nothing is dropped in practice.
 void menu_populate(const Game *const *list, int n) {
     g_n = n < MAXCART ? n : MAXCART;
-    for (int i = 0; i < g_n; i++) g_order[i] = list[i];
+    // `list` is always GEN_GAMES itself (every platform calls menu_populate(GEN_GAMES, GEN_NGAMES)
+    // right after reading it) so index i here IS index i into GEN_BYTES — both arrays were written
+    // by the same loop, over the same roster, in tools/gen-games.sh. i < GEN_NGAMES is just a guard,
+    // not expected to ever be false.
+    for (int i = 0; i < g_n; i++) {
+        g_cart[i] = *list[i];
+        g_cart[i].bytes = (i < GEN_NGAMES) ? GEN_BYTES[i] : 0;
+        g_order[i] = &g_cart[i];
+    }
     // Read-only, and read-only on purpose: cvx_data_path(...,0) creates nothing, so populating the
     // shelf never leaves a directory behind on a headless run. A missing file, an unreadable one, or
     // a name that matches nothing in today's roster all land in the same place — roster order — which
@@ -652,7 +668,7 @@ static void fmt_thousands(long n, char *buf, size_t bufsz) {
 // how big it is — a cartridge's back is where a real one carries its byline and its spec plate, so
 // both read as that little world's own print, not a HUD. Either line stands alone, centred on the
 // label the way the credit always was; if both are present they split the label instead of colliding.
-static void build_dev(const char *author) {
+static void build_dev(const Game *g) {
     tb_begin(&txt_m, txt_v, txt_t, TMAXV, TMAXT);
     int32_t availw = g_lw * 2 * 92 / 100;
     int32_t cyc    = (g_lt + g_lb) / 2;
@@ -661,28 +677,28 @@ static void build_dev(const char *author) {
     // author "reads as anonymous", and the shelf took that literally — so every cart nobody had
     // signed yet wore a credit line naming a person who does not exist, which looks like a shipped
     // placeholder rather than an absence. Nothing to say, so say nothing.
-    int has_author = author && author[0];
-    // cvx_exe_size() resolves and caches once at init (see data.c), so the number is stable frame
-    // to frame within a run; if the platform won't say (returns 0) this line draws nothing too,
-    // rather than print "0 BYTES".
-    long exe_bytes = cvx_exe_size();
-    int has_size = exe_bytes > 0;
+    int has_author = g->author && g->author[0];
+    // g->bytes is THIS cartridge's own compiled size, patched onto its copy in menu_populate from
+    // the manifest tools/gen-games.sh measured — not the whole disk's size (that path is gone; see
+    // build.sh/build-ship.sh). 0 means the build couldn't measure it, and draws nothing here too,
+    // same as an unsigned cartridge draws no byline — never a printed "0 BYTES".
+    int has_size = g->bytes > 0;
     // Splitting the label is only needed when both lines are present; either one alone still
     // centres on the label's own vertical middle, exactly where the single credit line always sat.
     int32_t split = (has_author && has_size) ? (g_lt - g_lb) / 4 : 0;
     if (has_author) {
         static char dev[40];
         int j = 0; dev[j++] = 'B'; dev[j++] = 'Y'; dev[j++] = ' ';
-        const char *a = author;
+        const char *a = g->author;
         for (int i = 0; a[i] && j < 38; i++) dev[j++] = a[i];
         dev[j] = 0;
         emit_text(dev, z, 32767, 1, 144, availw, cyc + split);   // BY <author>, developer ink, mirrored
     }
     if (has_size) {
         char have[24], line[32];
-        fmt_thousands(exe_bytes, have, sizeof have);
+        fmt_thousands(g->bytes, have, sizeof have);
         snprintf(line, sizeof line, "%s BYTES", have);
-        emit_text(line, z, 32767, 1, 144, availw, cyc - split);  // the spec plate: this cart's own size, same ink
+        emit_text(line, z, 32767, 1, 144, availw, cyc - split);  // the spec plate: THIS cart's own size, same ink
     }
 }
 
@@ -1205,7 +1221,7 @@ static void draw_options(void) {
 static void draw(void) {
     // Re-bake the selected cart's name/developer geometry only when the selection changes — shared by
     // the shelf and both console animations, so bake it once here for every path below.
-    if (g_n && g_txt_sel != g_sel) { build_dev(g_list[g_sel]->author); g_txt_sel = g_sel; }
+    if (g_n && g_txt_sel != g_sel) { build_dev(g_list[g_sel]); g_txt_sel = g_sel; }
 
     if (g_phase == P_BOOT) {
         fb_clear(0);
