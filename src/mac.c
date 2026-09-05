@@ -213,7 +213,8 @@ static void read_input(Input in[2]) {
                      (int8_t)(g_keys[124] - g_keys[123]),    // -> - <- (P1 look yaw)
                      (int8_t)(g_keys[126] - g_keys[125]),    // up - down (P1 look pitch)
                      g_keys[49],                             // space
-                     g_keys[14] };                           // E
+                     g_keys[14],                             // E
+                     g_keys[38] };                           // J — the body's own key, off SPACE
     in[1] = (Input){ (int8_t)(g_keys[124] - g_keys[123]),          // -> - <-   (P2 move x)
                      (int8_t)(g_keys[126] - g_keys[125]),          // up - down (P2 move y)
                      0, 0,                                         // P2 has no look stick on the keys
@@ -362,6 +363,7 @@ int main(int argc, char **argv) {
             if (lc == 'l') in[p].x = -1; else if (lc == 'r') in[p].x = 1; \
             else if (lc == 'u') in[p].y = 1; else if (lc == 'd') in[p].y = -1; \
             else if (lc == 'j') in[p].jump = 1; else if (lc == 'a') in[p].act = 1; \
+            else if (lc == 'k') in[p].jet = 1; /* k = J, the body key (j is already taken by SPACE/jump) */ \
         } \
         if (lookarg && (size_t)(f) < strlen(lookarg)) { \
             char c = lookarg[f]; \

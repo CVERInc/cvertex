@@ -112,7 +112,8 @@ static void read_input(Input in[2]) {
                      (int8_t)(g_keys['W'] - g_keys['S']),            // forward/back
                      (int8_t)(g_keys[VK_RIGHT] - g_keys[VK_LEFT]),   // look yaw
                      (int8_t)(g_keys[VK_UP] - g_keys[VK_DOWN]),      // look pitch
-                     g_keys[VK_SPACE], g_keys['E'] };
+                     g_keys[VK_SPACE], g_keys['E'],
+                     g_keys['J'] };                                 // J — the body's own key, off SPACE
     in[1] = (Input){ (int8_t)(g_keys[VK_RIGHT] - g_keys[VK_LEFT]),   // P2 move x
                      (int8_t)(g_keys[VK_UP] - g_keys[VK_DOWN]),      // P2 move y
                      0, 0,                                           // P2 has no look stick on the keys
@@ -183,6 +184,7 @@ int main(int argc, char **argv) {
             if (lc == 'l') in[p].x = -1; else if (lc == 'r') in[p].x = 1; \
             else if (lc == 'u') in[p].y = 1; else if (lc == 'd') in[p].y = -1; \
             else if (lc == 'j') in[p].jump = 1; else if (lc == 'a') in[p].act = 1; \
+            else if (lc == 'k') in[p].jet = 1; /* k = J, the body key (j is already taken by SPACE/jump) */ \
         } \
     } while (0)
 

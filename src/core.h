@@ -60,6 +60,12 @@ typedef struct {
     int8_t  rx, ry;    // look plane / RIGHT stick. rx = yaw (turn), ry = pitch (up/down).
     uint8_t jump;      // space / return
     uint8_t act;       // the game's own verb — morph, grab, whatever it has
+    // 🔴 Appended LAST, same bargain rx/ry describe above: every existing `(Input){...}` positional
+    // literal in every cartridge, whatever its own field count, still compiles and still zero-fills
+    // this one untouched — the shape change alone cannot move a single existing checksum, because
+    // nothing reads this field yet except a cartridge that names it. A cartridge may bind this to a
+    // body action distinct from the placing verb above; the platform layer reads it on its own key.
+    uint8_t jet;       // a second face button, read on the keydown state like jump
 } Input;
 
 // Polygon scanline fill (even-odd). pts = x0,y0,x1,y1,... 16.0 fixed point.
