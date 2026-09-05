@@ -334,7 +334,7 @@ int main(int argc, char **argv) {
             printf("  --fullscreen\n");
             printf("  --camz <units>    override a game's camera distance (dev)\n");
             printf("  --keys <string>   scripted input, one char per frame, player 1:\n");
-            printf("                      . idle  l/r/u/d move  j jump  a act\n");
+            printf("                      . idle  l/r/u/d move  j jump  a act  k jet (a cartridge's own body key)\n");
             printf("                      uppercase does the same for player 2\n");
             printf("  --mouse <string>  scripted pointer for --ppm/--headless, one entry per frame:\n");
             printf("                      \"x,y,btn;x,y,btn;...\"  btn: bit0=left bit1=right\n");
