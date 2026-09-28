@@ -243,6 +243,9 @@ int main(int argc, char **argv) {
             printf("  P1: A/D/W/S + Space + E.  P2: arrows + Enter + Right-Shift or '/'.  Esc quits.\n");
             return 0;
         }
+        // --version: the same two lines mac.c and win.c print. Without it the flag fell through to
+        // the "-x <n>" rule unconsumed and the window opened — "cannot open X display" headless.
+        else if (!strcmp(argv[a], "--version")) { printf("cvertex %s\ndata: %s\n", CVERTEX_VERSION, cvx_data_dir()); fflush(stdout); return 0; }
         else if (argv[a][0] == '-' && a + 1 < argc) { runmode = argv[a]; modearg = atoi(argv[a+1]); a++; }
     }
     g_headless = (runmode != 0);

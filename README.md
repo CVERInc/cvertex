@@ -153,7 +153,7 @@ const Game game_pong = { "pong", init, tick, audio, draw, checksum };
 > second contributor leaves theirs the same — so make it yours.
 
 `build.sh` runs `tools/gen-games.sh`, which scans `games/*.c` for each `const Game game_X`
-and writes the roster into `src/games.gen.h`. It is an emulator reading its ROM folder,
+and writes the roster into `gen/games.gen.h`. It is an emulator reading its ROM folder,
 done at build time — the `.c` is the ROM, and building is the cartridge going in. The one
 name the folder doesn't decide is `menu`: that file is the shell, not a cartridge.
 
