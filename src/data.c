@@ -22,6 +22,12 @@
 // One file, fenced with #ifdef, rather than three copies in mac.c/lnx.c/win.c — the same
 // bargain net.c already makes. Three copies of one derivation is the defect this codebase
 // has met more often than any other.
+//
+// readlink() is POSIX, not C11: under -std=c11 glibc declares it only when asked, the same way
+// lnx.c asks. (macOS and Windows take their own branches below and don't need it.)
+#ifdef __linux__
+  #define _POSIX_C_SOURCE 200809L
+#endif
 #include "core.h"
 #include "version.h"   // CVERTEX_NAME — the product name lives in exactly one place
 #include <stdio.h>

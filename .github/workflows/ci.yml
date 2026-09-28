@@ -48,6 +48,18 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libx11-dev libasound2-dev
       - name: sh build-linux.sh
         run: sh build-linux.sh
+      # 每張卡匣的大小(GEN_BYTES)是 tools/gen-games.sh 量的。量不到時它給 0 ——
+      # 0 在 game.h 裡的意思是「不知道」,架上什麼都不畫,所以壞掉的量法看起來跟沒事一樣。
+      # ⇒ 在這裡要求每一格都大於 0。
+      - name: 每張卡匣都量得到大小
+        run: |
+          awk '/GEN_BYTES\[\]/{on=1;next} on&&/};/{on=0} on{n++; if ($1+0 <= 0) bad++} END{print n " entries"; exit !(n>0 && !bad)}' gen/games.gen.h
+      # --version 不需要視窗;沒有 DISPLAY 的機器上它開窗就是掛掉。
+      - name: --version 不開視窗
+        run: env -u DISPLAY ./cvertex --version | grep -q '^cvertex '
+      # README 說 Linux 版在真的 Linux 上編得起來 —— 不只是 runner 的預設 cc(gcc)。
+      - name: CC=clang sh build-linux.sh
+        run: CC=clang OUT=cvertex-clang sh build-linux.sh
       # 建得起來還不夠 —— 一個連 menu 都跑不動的 binary 是編譯過的垃圾。
       # 跑一張卡匣 300 幀,證明這個平台層真的活著。
       # 🩸 第一版把卡匣的名字寫死成 `waxwing` —— 而 waxwing 是**卡匣實驗室**那個 repo 的東西,
